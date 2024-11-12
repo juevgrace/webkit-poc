@@ -38,6 +38,11 @@
     </div>
 
     <script>
+        /**
+         * This script is intended for controlled security research and testing only.
+         * Ensure you have permission and are adhering to all applicable guidelines and laws.
+         */
+
         class Base {
             constructor() {
                 super();
@@ -66,7 +71,7 @@
                 await testFunction();
                 logStatus(`${testFunction.name} Test Passed`);
             } catch (error) {
-                logStatus(`${testFunction.name} Test Failed: ${error.message}`);
+                console.error(`Error during ${testFunction.name}:`, error.message, error.stack);
             }
         }
 
@@ -131,7 +136,7 @@
 
         function logStatus(message) {
             const output = document.getElementById("output");
-            output.innerHTML += `<p>${message}</p>`;
+            output.textContent += `${message}\n`;
         }
 
         function showLoadingCircle() {
@@ -182,8 +187,8 @@
                 let tests = [exploitArrayHandling, exploitLargeStringConcatenation, exploitComplexRegex, test1, test2];
                 let delay = 2000; // 2-second delay between each test
 
-                for (let i = 0; i < tests.length; i++) {
-                    await performTest(tests[i]);
+                for await (let test of tests) {
+                    await performTest(test);
                     await new Promise(resolve => setTimeout(resolve, delay));
                 }
             } catch (error) {
