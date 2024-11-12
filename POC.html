@@ -1,0 +1,45 @@
+// Enhanced PoC for WebKit Vulnerabilities
+
+console.log("Starting PoC...");
+
+try {
+    // PART 1: Array Handling Vulnerability
+
+    console.log("Testing array handling...");
+    let largeArray = new Array(1000000);
+    largeArray[999999] = 1;  // Set the last element
+
+    // Out-of-bounds access
+    console.log("Accessing out-of-bounds in array:", largeArray[1000000]);
+
+    // Writing out-of-bounds to test memory response
+    largeArray[1000000] = 2;
+    console.log("After out-of-bounds write:", largeArray[1000000]);
+
+    // PART 2: String Concatenation Vulnerability
+
+    console.log("Testing large string concatenation...");
+    let longString = "a".repeat(1e7); // Create a string of 10 million "a" characters
+    let concatenatedString = longString + longString; // Double the string length
+
+    console.log("Concatenated string length:", concatenatedString.length); // Output the length
+
+    // PART 3: Complex Regular Expression Vulnerability
+
+    console.log("Testing complex regular expression...");
+    let regexPattern = /(a|a|a|a|a|a|a|a|a|a){1000}/; // Extremely repetitive pattern
+    let testString = "a".repeat(1000); // Input string to match against regex
+
+    let matchResult = testString.match(regexPattern);
+    console.log("Regex match result:", matchResult);
+
+    // Optional garbage collection, if supported
+    if (typeof gc === 'function') {
+        gc();
+    }
+
+} catch (error) {
+    console.error("Error encountered during PoC execution:", error);
+}
+
+console.log("PoC completed.");
