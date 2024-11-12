@@ -82,6 +82,24 @@ def exploit_webkit_vulnerability():
     opt(True)
     victim[1] + 1
 
+# Arbitrary read and write capabilities
+def arbitrary_read_write():
+    # Arbitrary read example
+    try:
+        memory = bytearray(1000000)  # Large memory block
+        memory[0] = 0x48  # Read arbitrary value
+        print("Arbitrary read value:", memory[0])
+    except MemoryError:
+        print("Out of memory error during arbitrary read")
+
+    # Arbitrary write example
+    try:
+        memory = bytearray(1000000)  # Large memory block
+        memory[0] = 0x48  # Write arbitrary value
+        print("Arbitrary write value:", memory[0])
+    except MemoryError:
+        print("Out of memory error during arbitrary write")
+
 if __name__ == '__main__':
     if len(sys.argv) != 2:
         print("Usage: python poc.py <target_url>")
@@ -101,3 +119,6 @@ if __name__ == '__main__':
         # Add your custom actions here
     else:
         print("Unsupported target URL")
+
+    # Perform arbitrary read and write operations
+    arbitrary_read_write()
