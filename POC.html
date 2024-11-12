@@ -5,6 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebKit Vulnerability Proof of Concept</title>
     <style>
+        :root {
+            --background-color: #222;
+            --text-color: #ddd;
+            --progress-bar-bg: #333;
+            --progress-bar-fill: #555;
+        }
+
+        body {
+            background-color: var(--background-color);
+            color: var(--text-color);
+            font-family: Arial, sans-serif;
+        }
+
         #loading-dots {
             display: none;
             position: relative;
@@ -18,7 +31,7 @@
             width: 10px;
             height: 10px;
             margin-right: 5px;
-            background-color: #3498db;
+            background-color: var(--progress-bar-fill);
             border-radius: 50%;
             animation: dot 1s infinite ease-in-out;
         }
@@ -38,14 +51,36 @@
 
         #progress-bar {
             width: 100%;
-            background-color: #f3f3f3;
+            background-color: var(--progress-bar-bg);
             margin-top: 10px;
         }
 
         #progress {
             width: 0;
             height: 20px;
-            background-color: #3498db;
+            background-color: var(--progress-bar-fill);
+        }
+
+        #output {
+            background-color: var(--background-color);
+            color: var(--text-color);
+            padding: 10px;
+            border: 1px solid #555;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        button {
+            background-color: var(--progress-bar-fill);
+            color: var(--text-color);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #444;
         }
     </style>
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; object-src 'none';">
