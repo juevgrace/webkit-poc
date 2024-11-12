@@ -30,9 +30,8 @@ arr[0] = b.prototype
 opt(True)
 victim[1] + 1
 
-# Perform the array handling, large string concatenation, and complex regex exploits
 def exploit_array_handling():
-    array_size = 1000000  # Increased array size to trigger out-of-memory error
+    array_size = 1000000
     array = [str(i) for i in range(array_size)]
 
     for i in range(array_size):
@@ -41,7 +40,7 @@ def exploit_array_handling():
     re.compile('|'.join(array))
 
 def exploit_large_string_concatenation():
-    string_size = 1000000  # Increased string size to trigger out-of-memory error
+    string_size = 1000000
     large_string = ''.join(chr(i) for i in range(32, 127)) * (string_size // 95)
 
     large_string += large_string
@@ -82,20 +81,17 @@ def exploit_webkit_vulnerability():
     opt(True)
     victim[1] + 1
 
-# Arbitrary read and write capabilities
 def arbitrary_read_write():
-    # Arbitrary read example
     try:
-        memory = bytearray(1000000)  # Large memory block
-        memory[0] = 0x48  # Read arbitrary value
+        memory = bytearray(1000000)
+        memory[0] = 0x48
         print("Arbitrary read value:", memory[0])
     except MemoryError:
         print("Out of memory error during arbitrary read")
 
-    # Arbitrary write example
     try:
-        memory = bytearray(1000000)  # Large memory block
-        memory[0] = 0x48  # Write arbitrary value
+        memory = bytearray(1000000)
+        memory[0] = 0x48
         print("Arbitrary write value:", memory[0])
     except MemoryError:
         print("Out of memory error during arbitrary write")
@@ -107,18 +103,14 @@ if __name__ == '__main__':
 
     target_url = sys.argv[1]
 
-    # Perform the exploits
     exploit_array_handling()
     exploit_large_string_concatenation()
     exploit_complex_regex()
     exploit_webkit_vulnerability()
 
-    # Perform additional actions based on the target URL
     if 'example.com' in target_url:
         print("Attacking example.com")
-        # Add your custom actions here
     else:
         print("Unsupported target URL")
 
-    # Perform arbitrary read and write operations
     arbitrary_read_write()
