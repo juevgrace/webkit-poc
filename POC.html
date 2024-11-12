@@ -122,6 +122,35 @@
                 // Perform the array handling PoC
                 logStatus("Starting array handling PoC...");
                 await performTest(exploitArrayHandling);
+
+                // Introduce a race condition
+                logStatus("Introducing race condition...");
+                let raceCondition = async () => {
+                    let value1 = 0;
+                    let value2 = 0;
+
+                    // Simulate concurrent access
+                    (async () => {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        value1 = 1;
+                        logStatus("Concurrent access to value1");
+                    })();
+
+                    (async () => {
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                        value2 = 2;
+                        logStatus("Concurrent access to value2");
+                    })();
+
+                    // Check the values
+                    if (value1 === 1 && value2 === 2) {
+                        logStatus("Race condition detected");
+                    } else {
+                        logStatus("Race condition not detected");
+                    }
+                };
+
+                await raceCondition();
             } catch (error) {
                 console.error("Error encountered during PoC execution:", error);
             } finally {
