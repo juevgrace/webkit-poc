@@ -39,9 +39,6 @@
     </div>
 
     <script>
-        import log from 'loglevel';
-        log.setLevel('info');
-
         class Base {
             constructor() {
                 super();
@@ -68,9 +65,8 @@
         async function performTest(testFunction) {
             try {
                 await testFunction();
-                log.info(`${testFunction.name} Test Passed`);
             } catch (error) {
-                errorHandler(error, testFunction.name);
+                console.error(`Error in ${testFunction.name}:`, error.message, error.stack);
             }
         }
 
@@ -124,32 +120,15 @@
 
             try {
                 // Perform the array handling PoC
-                log.info("Starting array handling PoC...");
+                logStatus("Starting array handling PoC...");
                 await performTest(exploitArrayHandling);
             } catch (error) {
-                log.error("Error encountered during PoC execution:", error);
+                console.error("Error encountered during PoC execution:", error);
             } finally {
                 hideLoadingCircle();
                 showContent();
             }
         }
-
-        function errorHandler(error, functionName) {
-            log.error(`Error in ${functionName}:`, error.message, error.stack);
-            // Optionally, implement a retry logic or rollback mechanism
-        }
-
-        const observer = new PerformanceObserver((list) => {
-            for (const entry of list.getEntries()) {
-                log.info(`${entry.name}: ${entry.duration}ms`);
-            }
-        });
-        observer.observe({ entryTypes: ['measure'] });
-
-        performance.mark('start');
-        startPoC();
-        performance.mark('end');
-        performance.measure('Test Duration', 'start', 'end');
     </script>
 </body>
 </html>
