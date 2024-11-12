@@ -1,15 +1,15 @@
-import re
 import sys
+import re
 
 class Base:
     def __init__(self):
         super().__init__()
         super().__init__(1)
 
-victim = [1.1, 2.2, 3.3]
-victim[0] = 1.1
-
-b = Base()
+class MyFunction(Base):
+    def __init__(self):
+        super().__init__()
+        super().__init__(1)
 
 def opt(flag):
     victim[0] = 13.37
@@ -18,29 +18,15 @@ def opt(flag):
         victim[1] = victim[1]
     victim[1] = 3.54484805889626e-310
 
-arr = [1.1]
-Object.defineProperty(arr, 0, {'value': 1.1, 'configurable': False, 'writable': True})
-
-b.__defineGetter__("prototype", lambda: victim[1])
-
-for i in range(0x100000):
-    opt(False)
-
-arr[0] = b.prototype
-opt(True)
-victim[1] + 1
-
 def exploit_array_handling():
     largeArray = [None] * 1000000
     largeArray[999999] = 1
 
-    # Out-of-bounds access
     try:
         print("Accessing out-of-bounds in array:", largeArray[1000000])
     except IndexError:
         print("Caught IndexError for out-of-bounds access")
 
-    # Writing out-of-bounds to test memory response
     try:
         largeArray[1000000] = 2
         print("After out-of-bounds write:", largeArray[1000000])
@@ -60,6 +46,21 @@ def exploit_complex_regex():
     matchResult = re.search(regexPattern, testString)
     print("Regex match result:", matchResult)
 
+def test1():
+    f = MyFunction()
+    try:
+        f.__defineGetter__("prototype", lambda: {})
+    except Exception as e:
+        print("Caught exception in test1:", e)
+
+def test2(i):
+    f = MyFunction()
+    try:
+        f.__defineGetter__("prototype", lambda: {})
+    except Exception as e:
+        print("Caught exception in test2:", e)
+    f.prototype.x = i  # Should not crash
+
 if __name__ == '__main__':
     if len(sys.argv) != 2:
         print("Usage: python poc.py <target_url>")
@@ -78,3 +79,7 @@ if __name__ == '__main__':
         # Add your custom actions here
     else:
         print("Unsupported target URL")
+
+    # Perform additional tests
+    test1()
+    test2(0)
