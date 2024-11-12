@@ -115,7 +115,7 @@
             let largeArray = new Array(1000000);
             largeArray[999999] = 1;
             console.time("Clobber world test");
-            
+
             try {
                 console.log("Accessing out-of-bounds in array:", largeArray[1000000]);
             } catch (error) {
@@ -130,6 +130,20 @@
             }
 
             console.timeEnd("Clobber world test");
+
+            // Additional aggressive tests
+            try {
+                console.log("Accessing out-of-bounds in array (more aggressive test):", largeArray[1000000]);
+            } catch (error) {
+                console.error("Caught IndexError for out-of-bounds access (aggressive test)", error);
+            }
+
+            try {
+                largeArray[1000000] = 3;
+                console.log("After out-of-bounds write (aggressive test):", largeArray[1000000]);
+            } catch (error) {
+                console.error("Caught IndexError for out-of-bounds write (aggressive test)", error);
+            }
         }
     </script>
 </body>
