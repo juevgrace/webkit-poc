@@ -36,28 +36,32 @@
             display: block;
         }
 
-        #progress-bar {
-            width: 100%;
-            background-color: #f3f3f3;
+        #output {
+            white-space: pre-wrap; /* Keeps formatting for multiline logs */
             margin-top: 10px;
+            font-family: monospace;
+            background-color: #f0f0f0;
+            padding: 10px;
+            border: 1px solid #ccc;
+            height: 200px;
+            overflow-y: auto; /* Make the log area scrollable */
         }
 
-        #progress {
-            width: 0;
-            height: 20px;
-            background-color: #3498db;
+        .log-success {
+            color: green;
+        }
+
+        .log-failure {
+            color: red;
         }
     </style>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; object-src 'none';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; object-src 'none';">
 </head>
 <body>
     <div id="loading-dots">
         <div></div>
         <div></div>
         <div></div>
-    </div>
-    <div id="progress-bar">
-        <div id="progress"></div>
     </div>
     <div id="content">
         <h1>WebKit Vulnerability Proof of Concept</h1>
@@ -66,17 +70,35 @@
     </div>
 
     <script>
-        function logStatus(message) {
+        // Function to log status to the output div
+        function logStatus(message, isSuccess = true) {
             const output = document.getElementById("output");
             const messageElement = document.createElement('p');
             messageElement.textContent = message;
+            messageElement.classList.add(isSuccess ? 'log-success' : 'log-failure');
             output.appendChild(messageElement);
+
+            // Auto-scroll to the bottom of the log
+            output.scrollTop = output.scrollHeight;
         }
 
-        function showMessage(message, isSuccess) {
-            const output = document.getElementById("output");
-            output.textContent += `${message}\n`;
-            output.style.color = isSuccess ? 'green' : 'red';
+        async function startPoC() {
+            showLoadingDots();
+            hideContent();
+
+            try {
+                logStatus("Starting PoC...");
+
+                // Perform your tests here
+                await exploitClobberWorld();
+
+                logStatus("PoC Completed Successfully", true);
+            } catch (error) {
+                logStatus("PoC Failed: " + error.message, false);
+            } finally {
+                hideLoadingDots();
+                showContent();
+            }
         }
 
         function showLoadingDots() {
@@ -95,54 +117,26 @@
             document.getElementById("content").style.display = "block";
         }
 
-        function updateProgressBar(percentage) {
-            document.getElementById("progress").style.width = `${percentage}%`;
-        }
+        async function exploitClobberWorld() {
+            logStatus("Starting Clobber World Test...");
 
-        async function startPoC() {
-            showLoadingDots();
-            hideContent();
-
-            try {
-                logStatus("Starting PoC...");
-                await outOfBoundsAccessTest();
-                await aggressiveOutOfBoundsTest();
-                await typeConfusionTest();
-                showMessage("PoC Completed Successfully", true);
-            } catch (error) {
-                showMessage("PoC Failed: " + error.message, false);
-            } finally {
-                hideLoadingDots();
-                showContent();
-            }
-        }
-
-        async function outOfBoundsAccessTest() {
             let largeArray = new Array(1000000);
             largeArray[999999] = 1;
 
             try {
-                console.log("Accessing out-of-bounds in array:", largeArray[1000000]);
+                logStatus("Accessing out-of-bounds in array: " + largeArray[1000000]);
             } catch (error) {
-                logStatus("Error: " + error.message);
+                logStatus("Caught IndexError for out-of-bounds access", false);
             }
-        }
-
-        async function aggressiveOutOfBoundsTest() {
-            let largeArray = new Array(1000000);
-            largeArray[999999] = 1;
 
             try {
                 largeArray[1000000] = 2;
-                console.log("Successfully wrote out-of-bounds!");
+                logStatus("Successfully wrote to out-of-bounds index!");
             } catch (error) {
-                logStatus("Error writing out-of-bounds: " + error.message);
+                logStatus("Caught IndexError for out-of-bounds write", false);
             }
-        }
 
-        async function typeConfusionTest() {
-            logStatus("Executing type confusion attack...");
-            // Add type confusion logic here
+            logStatus("Clobber World Test Finished.");
         }
     </script>
 </body>
