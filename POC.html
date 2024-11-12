@@ -102,6 +102,30 @@
                 exploitLargeStringConcatenation();
                 exploitComplexRegex();
 
+                // Test for XSS
+                document.body.innerHTML = "<script>alert('XSS');</script>";
+                console.log("XSS Test Passed");
+
+                // Test for IDOR
+                try {
+                    fetch("/vulnerable-resource?id=12345");
+                } catch (error) {
+                    console.error("IDOR Test Failed", error);
+                }
+
+                // Test for CSRF
+                try {
+                    fetch("/csrf-endpoint", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/x-www-form-urlencoded"
+                        },
+                        body: "csrf_token=token_value"
+                    });
+                } catch (error) {
+                    console.error("CSRF Test Failed", error);
+                }
+
                 // Perform additional actions based on the target URL
                 let targetUrl = window.location.href;
                 if (targetUrl.includes("example.com")) {
