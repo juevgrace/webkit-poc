@@ -161,18 +161,26 @@
                     // Check the values
                     if (value1 === 1 && value2 === 2) {
                         logStatus("Race condition detected");
+                        showMessage("Race condition detected");
                     } else {
                         logStatus("Race condition not detected");
+                        showMessage("Race condition not detected");
                     }
                 };
 
                 await raceCondition();
             } catch (error) {
                 console.error("Error encountered during PoC execution:", error);
+                showMessage("PoC failed");
             } finally {
                 hideLoadingDots();
                 showContent();
             }
+        }
+
+        function showMessage(message) {
+            const output = document.getElementById("output");
+            output.textContent += `${message}\n`;
         }
     </script>
 </body>
