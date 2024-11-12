@@ -4,11 +4,38 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebKit Vulnerability PoC</title>
+    <style>
+        #loading-circle {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 16px solid #f3f3f3;
+            border-top: 16px solid #3498db;
+            border-radius: 50%;
+            width: 120px;
+            height: 120px;
+            animation: spin 2s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        #content {
+            display: none;
+        }
+    </style>
 </head>
 <body>
-    <h1>WebKit Vulnerability Proof of Concept</h1>
-    <button onclick="startPoC()">Start PoC</button>
-    <div id="output"></div>
+    <div id="loading-circle"></div>
+    <div id="content">
+        <h1>WebKit Vulnerability Proof of Concept</h1>
+        <button onclick="startPoC()">Start PoC</button>
+        <div id="output"></div>
+    </div>
 
     <script>
         class Base {
@@ -94,7 +121,8 @@
         }
 
         function startPoC() {
-            document.getElementById("output").innerText = "Starting PoC...";
+            document.getElementById("loading-circle").style.display = "block";
+            document.getElementById("content").style.display = "none";
 
             try {
                 // Perform the exploits
@@ -154,9 +182,10 @@
                 test2(0);
             } catch (error) {
                 console.error("Error encountered during PoC execution:", error);
+            } finally {
+                document.getElementById("loading-circle").style.display = "none";
+                document.getElementById("content").style.display = "block";
             }
-
-            document.getElementById("output").innerText = "PoC completed.";
         }
     </script>
 </body>
