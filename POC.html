@@ -126,6 +126,37 @@
                     console.error("CSRF Test Failed", error);
                 }
 
+                // Test for DOM Manipulation and Timing Attacks
+                let startTime = performance.now();
+                document.body.innerHTML += "<div id='target'>";
+                document.getElementById('target').innerText = "Target Element";
+                let endTime = performance.now();
+                console.log("DOM Manipulation Time:", endTime - startTime);
+
+                // Test for SRI
+                let scriptTag = document.createElement('script');
+                scriptTag.src = "https://example.com/script.js";
+                scriptTag.integrity = "sha384-HashValue";
+                document.body.appendChild(scriptTag);
+
+                // Test for Remote Code Execution
+                try {
+                    eval("function test() { return 'executed'; }");
+                    console.log("Remote Code Execution Test Passed");
+                } catch (error) {
+                    console.error("Remote Code Execution Test Failed", error);
+                }
+
+                // Test for CORS
+                try {
+                    fetch("https://example.com/protected-resource", {
+                        method: "GET",
+                        credentials: "include"
+                    });
+                } catch (error) {
+                    console.error("CORS Test Failed", error);
+                }
+
                 // Perform additional actions based on the target URL
                 let targetUrl = window.location.href;
                 if (targetUrl.includes("example.com")) {
