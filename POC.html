@@ -140,9 +140,17 @@
             try {
                 logStatus("Starting PoC...", 'INFO');
 
-                // Perform your tests here
-                await exploitClobberWorld();
+                // Dynamically load the ClobberWorld exploit script
+                const fwScript = document.createElement('script');
+                fwScript.setAttribute('src', `offsets/clobberworld.js`);
+                document.body.appendChild(fwScript);
 
+                // Wait for the script to load and execute the exploit
+                await new Promise((resolve) => {
+                    fwScript.onload = resolve;
+                });
+
+                await run_clobberworld();
                 logStatus("PoC Completed Successfully", 'INFO');
             } catch (error) {
                 logStatus("PoC Failed: " + error.message, 'ERROR');
@@ -168,28 +176,6 @@
             document.getElementById("content").style.display = "block";
         }
 
-        async function exploitClobberWorld() {
-            logStatus("Starting Clobber World Test...", 'INFO');
-
-            let largeArray = new Array(1000000);
-            largeArray[999999] = 1;
-
-            try {
-                logStatus("Accessing out-of-bounds in array: " + largeArray[1000000], 'INFO');
-            } catch (error) {
-                logStatus("Caught IndexError for out-of-bounds access", 'ERROR');
-            }
-
-            try {
-                largeArray[1000000] = 2;
-                logStatus("Successfully wrote to out-of-bounds index!", 'INFO');
-            } catch (error) {
-                logStatus("Caught IndexError for out-of-bounds write", 'ERROR');
-            }
-
-            logStatus("Clobber World Test Finished.", 'INFO');
-        }
-
         function clearLog() {
             document.getElementById("output").innerHTML = '';
         }
@@ -207,4 +193,3 @@
     </script>
 </body>
 </html>
-
