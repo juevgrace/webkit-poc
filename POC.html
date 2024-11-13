@@ -140,33 +140,33 @@
             try {
                 logStatus("Starting PoC...", 'INFO');
 
-                // Dynamically load the ClobberWorld exploit script
-                const fwScript = document.createElement('script');
-                fwScript.setAttribute('src', `offsets/clobberworld.js`);
-                document.body.appendChild(fwScript);
+                // Dynamically load the exploit script
+                const exploitScript = document.createElement('script');
+                exploitScript.setAttribute('src', `offsets/exploit.js`);
+                document.body.appendChild(exploitScript);
 
                 // Wait for the script to load and execute the exploit
                 await new Promise((resolve) => {
-                    fwScript.onload = () => {
-                        console.log("Script loaded successfully");
+                    exploitScript.onload = () => {
+                        console.log("Exploit script loaded successfully");
                         resolve();
                     };
                 });
 
-                // Ensure the script is loaded and running
+                // Ensure the exploit script is running
                 await new Promise((resolve) => {
-                    const script = document.getElementById('clobberworld-script');
+                    const script = document.getElementById('exploit-script');
                     if (script) {
-                        console.log("Script is running");
+                        console.log("Exploit script is running");
                         resolve();
                     } else {
-                        console.log("Script is not running");
+                        console.log("Exploit script is not running");
                         setTimeout(resolve, 1000);
                     }
                 });
 
-                // Call the run_clobberworld function
-                await run_clobberworld();
+                // Call the exploit function
+                await run_exploit();
                 logStatus("PoC Completed Successfully", 'INFO');
             } catch (error) {
                 logStatus("PoC Failed: " + error.message, 'ERROR');
