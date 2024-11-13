@@ -147,9 +147,25 @@
 
                 // Wait for the script to load and execute the exploit
                 await new Promise((resolve) => {
-                    fwScript.onload = resolve;
+                    fwScript.onload = () => {
+                        console.log("Script loaded successfully");
+                        resolve();
+                    };
                 });
 
+                // Ensure the script is loaded and running
+                await new Promise((resolve) => {
+                    const script = document.getElementById('clobberworld-script');
+                    if (script) {
+                        console.log("Script is running");
+                        resolve();
+                    } else {
+                        console.log("Script is not running");
+                        setTimeout(resolve, 1000);
+                    }
+                });
+
+                // Call the run_clobberworld function
                 await run_clobberworld();
                 logStatus("PoC Completed Successfully", 'INFO');
             } catch (error) {
