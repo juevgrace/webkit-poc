@@ -119,8 +119,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function escalatePrivileges() {
         log("Attempting privilege escalation.");
-        // Example: Overwrite window.location.href to redirect
-        window.location.href = "https://attacker-website.com";
+        // Comment out or remove the line causing redirection to stop it.
+        // window.location.href = "https://attacker-website.com";
+        log("Privilege escalation complete without redirection.");
     }
 
     function injectMaliciousCode() {
