@@ -54,11 +54,10 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }
 
-        // Proxy will now return a fallback value (42) if 'foo' is not found
         Leaker.prototype.__proto__ = new Proxy({}, {
             get(target, propertyName, receiver) {
                 if (propertyName === "foo") {
-                    return 42; // Return a fallback value for 'foo'
+                    return 42; // Fallback value for 'foo'
                 }
                 return receiver; // Return the receiver for other properties
             }
@@ -80,10 +79,10 @@ document.addEventListener('DOMContentLoaded', function () {
         Leaker.prototype.__proto__ = new Proxy({}, {
             get(target, propertyName, receiver) {
                 if (propertyName === "foo") {
-                    return 42; // Return a fallback value for 'foo'
+                    return 42; // Fallback value for 'foo'
                 }
                 if (propertyName === "bar") {
-                    return 84; // Return a fallback value for 'bar'
+                    return 84; // Fallback value for 'bar'
                 }
                 return receiver; // Return the receiver for other properties
             }
@@ -110,7 +109,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     receiver = __receiver; // Capture the receiver
                     return true;
                 }
-                return false; // Prevent setting any other properties
+                return false; // Prevent setting other properties
             }
         });
 
@@ -136,7 +135,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     receiver = __receiver; // Capture the receiver
                     return true;
                 }
-                return false; // Prevent setting any other properties
+                return false; // Prevent setting other properties
             }
         });
 
@@ -144,7 +143,9 @@ document.addEventListener('DOMContentLoaded', function () {
         return leak();
     }
 
-    for (var i = 0; i < 1e5; i++) {
+    // Limit the number of iterations for debugging purposes
+    const MAX_ITERATIONS = 100; // Reduce the iterations for troubleshooting
+    for (var i = 0; i < MAX_ITERATIONS; i++) {
         try {
             log(`Iteration ${i}: Starting attempt`);
 
@@ -160,12 +161,12 @@ document.addEventListener('DOMContentLoaded', function () {
             const result4 = tryToLeakThisViaSetByVal();
             log(`tryToLeakThisViaSetByVal: ${result4}`);
 
-            if (i % 100 === 0) {
+            if (i % 10 === 0) {
                 log(`Iteration ${i} completed successfully.`);
             }
         } catch (error) {
             log(`Error encountered at iteration ${i}: ${error.message}`);
-            break;
+            break; // Exit loop on failure
         }
     }
 
