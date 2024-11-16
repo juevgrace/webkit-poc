@@ -54,9 +54,13 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }
 
+        // Proxy will now return a fallback value (42) if 'foo' is not found
         Leaker.prototype.__proto__ = new Proxy({}, {
             get(target, propertyName, receiver) {
-                return target[propertyName] || receiver;
+                if (propertyName === "foo") {
+                    return 42; // Return a fallback value for 'foo'
+                }
+                return receiver; // Return the receiver for other properties
             }
         });
 
@@ -75,7 +79,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
         Leaker.prototype.__proto__ = new Proxy({}, {
             get(target, propertyName, receiver) {
-                return target[propertyName] || receiver;
+                if (propertyName === "foo") {
+                    return 42; // Return a fallback value for 'foo'
+                }
+                if (propertyName === "bar") {
+                    return 84; // Return a fallback value for 'bar'
+                }
+                return receiver; // Return the receiver for other properties
             }
         });
 
@@ -96,8 +106,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
         Leaker.prototype.__proto__ = new Proxy({}, {
             set(target, propertyName, value, __receiver) {
-                receiver = __receiver;
-                return true;
+                if (propertyName === "foo") {
+                    receiver = __receiver; // Capture the receiver
+                    return true;
+                }
+                return false; // Prevent setting any other properties
             }
         });
 
@@ -119,8 +132,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
         Leaker.prototype.__proto__ = new Proxy({}, {
             set(target, propertyName, value, __receiver) {
-                receiver = __receiver;
-                return true;
+                if (propertyName === "foo" || propertyName === "bar") {
+                    receiver = __receiver; // Capture the receiver
+                    return true;
+                }
+                return false; // Prevent setting any other properties
             }
         });
 
