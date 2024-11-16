@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=scale">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebKit Vulnerability Proof of Concept</title>
     <style>
         body {
@@ -11,72 +11,124 @@
             color: #aaa;
         }
 
-        hroup {
-            margin-bottom: 1em; /* Use a valid unit like 1em */
+        div {
+            margin-bottom: 1em;
         }
     </style>
 </head>
 <body>
 
-<hroup>WebKit Vulnerability Proof of Concept</hroup>
+<div>Your Content Here</div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     console.log("WebKit Vulnerability PoC loaded.");
 
-    // Step 1: Heap spray to control memory layout
-    function heapSpray() {
-        const sprayArray = [];
-        for (let i = 0; i < 10000; i++) {
-            let arr = new Uint32Array(10); // Create predictable memory layout
-            sprayArray.push(arr);
+    // Assertion function
+    function assert(x) {
+        if (!x) throw new Error("Bad assertion!");
+    }
+
+    (function() {
+        // Test leaking `this` via super with direct property access
+        function tryToLeakThisViaGetById() {
+            class Leaker {
+                leak() {
+                    return super.foo;
+                }
+            }
+
+            Leaker.prototype.__proto__ = new Proxy({}, {
+                get(target, propertyName, receiver) {
+                    return receiver; // Return the receiver object (potential leak)
+                }
+            });
+
+            const foo = 42;
+            const { leak } = Leaker.prototype;
+
+            return (() => leak())();
         }
-        console.log("Heap spray completed.");
-        return sprayArray;
-    }
 
-    // Step 2: Trigger vulnerability
-    function triggerBug() {
-        // Hypothetical vulnerability trigger
-        // Replace this with actual exploit code
-        let vulnObj = { vulnerable: true };
-        console.log("Vulnerability triggered:", vulnObj);
-        return vulnObj;
-    }
+        // Test leaking `this` via super with dynamic property access
+        function tryToLeakThisViaGetByVal() {
+            class Leaker {
+                leak() {
+                    return super[Math.random() < 0.5 ? "foo" : "bar"];
+                }
+            }
 
-    // Step 3: Leak memory address
-    function leakAddress(vulnObj) {
-        // Exploit vulnerability to leak address
-        // Replace with real memory leakage logic
-        let leakedAddr = 0xdeadbeef; // Example leaked address, to be replaced with actual leak logic
-        console.log("Leaked address:", leakedAddr.toString(16));
-        return leakedAddr;
-    }
+            Leaker.prototype.__proto__ = new Proxy({}, {
+                get(target, propertyName, receiver) {
+                    return receiver;
+                }
+            });
 
-    // Step 4: Gain R/W primitive
-    function writeMemory(leakedAddr, value) {
-        // Overwrite memory at leaked address
-        // Replace with logic to achieve arbitrary write
-        console.log("Writing", value.toString(16), "to address", leakedAddr.toString(16));
-        return true; // Indicate success, replace with actual success condition if needed
-    }
+            const foo = 42;
+            const bar = 84;
+            const { leak } = Leaker.prototype;
 
-    // Step 5: Execute exploit
-    function exploit() {
-        console.log("Exploit started...");
-        let spray = heapSpray(); // Step 1
-        let vulnObj = triggerBug(); // Step 2
-        let leakedAddr = leakAddress(vulnObj); // Step 3
-        let success = writeMemory(leakedAddr, 0x41414141); // Example value for writing
-        if (success) {
-            console.log("Exploit successful!");
-        } else {
-            console.log("Exploit failed.");
+            return (() => leak())();
         }
-    }
 
-    // Run the exploit
-    exploit();
+        // Test leaking `this` via super with direct property assignment
+        function tryToLeakThisViaSetById() {
+            let receiver;
+            class Leaker {
+                leak() {
+                    super.foo = {};
+                    return receiver; // Observe receiver after property set
+                }
+            }
+
+            Leaker.prototype.__proto__ = new Proxy({}, {
+                set(target, propertyName, value, __receiver) {
+                    receiver = __receiver;
+                    return true; // Indicate successful set operation
+                }
+            });
+
+            const foo = 42;
+            const { leak } = Leaker.prototype;
+
+            return (() => leak())();
+        }
+
+        // Test leaking `this` via super with dynamic property assignment
+        function tryToLeakThisViaSetByVal() {
+            let receiver;
+            class Leaker {
+                leak() {
+                    super[Math.random() < 0.5 ? "foo" : "bar"] = {};
+                    return receiver;
+                }
+            }
+
+            Leaker.prototype.__proto__ = new Proxy({}, {
+                set(target, propertyName, value, __receiver) {
+                    receiver = __receiver;
+                    return true;
+                }
+            });
+
+            const foo = 42;
+            const bar = 84;
+            const { leak } = Leaker.prototype;
+
+            return (() => leak())();
+        }
+
+        // Execute each leak attempt and validate results
+        for (var i = 0; i < 1e5; i++) {
+            assert(tryToLeakThisViaGetById() === undefined);
+            assert(tryToLeakThisViaGetByVal() === undefined);
+            assert(tryToLeakThisViaSetById() === undefined);
+            assert(tryToLeakThisViaSetByVal() === undefined);
+        }
+    })();
+
+    // Additional steps for heap spraying and memory writing can be added here as before
+
 });
 </script>
 
