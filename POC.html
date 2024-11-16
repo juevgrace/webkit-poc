@@ -10,6 +10,10 @@
             font-family: Arial, sans-serif;
             background-color: #000;
             color: #fff;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
 
         #log {
@@ -42,13 +46,11 @@ document.addEventListener('DOMContentLoaded', function () {
         const timestamp = new Date().toISOString();
         logBuffer.push(`[${timestamp}] ${message}`);
         
-        // Update log every 20 messages
-        if (logBuffer.length >= 20) {
-            logElement.textContent += logBuffer.join("\n") + "\n";
-            logBuffer = [];
-            logElement.scrollTop = logElement.scrollHeight; // Scroll to bottom
-        }
-        console.log(message);
+        // Flush the buffer immediately if there are any logs to display
+        logElement.textContent += logBuffer.join("\n") + "\n";
+        logBuffer = []; // Reset the buffer after flushing
+        logElement.scrollTop = logElement.scrollHeight; // Scroll to bottom
+        console.log(message); // Also log to the console for debugging
     }
 
     log("WebKit Exploit started.");
@@ -179,4 +181,3 @@ document.addEventListener('DOMContentLoaded', function () {
 
 </body>
 </html>
-
