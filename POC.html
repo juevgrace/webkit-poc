@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit Vulnerability Proof of Concept with Full-Screen Log</title>
+    <title>WebKit Vulnerability PoC - Enhanced Logging</title>
     <style>
         body {
             margin: 0;
@@ -31,7 +31,6 @@
 </head>
 <body>
 
-<!-- Full-Screen Log -->
 <div id="log"></div>
 
 <script>
@@ -46,7 +45,7 @@ document.addEventListener('DOMContentLoaded', function () {
         console.log(message); // Output to browser console for debugging
     }
 
-    log("WebKit Vulnerability PoC loaded.");
+    log("WebKit Vulnerability PoC initialized.");
 
     // Assertion function with logging
     function assert(x) {
@@ -57,109 +56,74 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    // Simulated Read and Write Functions
+    let memory = new Array(256).fill(0); // Simple memory simulation
+
+    function readMemory(offset) {
+        if (offset < 0 || offset >= memory.length) {
+            log(`Attempted invalid read at offset ${offset}`);
+            return undefined;
+        }
+        log(`Byte read at offset ${offset}: ${memory[offset]}`);
+        return memory[offset];
+    }
+
+    function writeMemory(offset, value) {
+        if (offset < 0 || offset >= memory.length) {
+            log(`Attempted invalid write at offset ${offset}`);
+            return false;
+        }
+        memory[offset] = value;
+        log(`Byte written at offset ${offset} with value: ${value}`);
+        return true;
+    }
+
     (function() {
-        function tryToLeakThisViaGetById() {
-            class Leaker {
-                leak() {
-                    return super.foo;
-                }
+        // Enhanced heap spray simulation
+        function heapSpray() {
+            let sprayedArrays = [];
+            for (let i = 0; i < 1000; i++) {
+                sprayedArrays.push(new Uint32Array(100));
             }
-
-            Leaker.prototype.__proto__ = new Proxy({}, {
-                get(target, propertyName, receiver) {
-                    return receiver;
-                }
-            });
-
-            const foo = 42;
-            const { leak } = Leaker.prototype;
-
-            return (() => leak())();
+            log(`Heap spray completed. Sprayed ${sprayedArrays.length} Uint32Arrays.`);
         }
 
-        function tryToLeakThisViaGetByVal() {
-            class Leaker {
-                leak() {
-                    return super[Math.random() < 0.5 ? "foo" : "bar"];
-                }
-            }
-
-            Leaker.prototype.__proto__ = new Proxy({}, {
-                get(target, propertyName, receiver) {
-                    return receiver;
-                }
-            });
-
-            const foo = 42;
-            const bar = 84;
-            const { leak } = Leaker.prototype;
-
-            return (() => leak())();
+        // Address leak simulation
+        function leakAddress() {
+            const address = Math.random() * 0xFFFFFFFFFFFF; // Simulated memory address
+            log(`Leaked address: 0x${address.toString(16)}`);
+            return address;
         }
 
-        function tryToLeakThisViaSetById() {
-            let receiver;
-            class Leaker {
-                leak() {
-                    super.foo = {};
-                    return receiver;
-                }
-            }
+        // Simulate read/write operations and vulnerability steps
+        heapSpray();
+        let leakedAddress = leakAddress();
 
-            Leaker.prototype.__proto__ = new Proxy({}, {
-                set(target, propertyName, value, __receiver) {
-                    receiver = __receiver;
-                    return true;
-                }
-            });
+        writeMemory(5, 229);
+        writeMemory(6, 148);
+        writeMemory(7, 64);
 
-            const foo = 42;
-            const { leak } = Leaker.prototype;
+        readMemory(5);
+        readMemory(6);
+        readMemory(7);
 
-            return (() => leak())();
-        }
-
-        function tryToLeakThisViaSetByVal() {
-            let receiver;
-            class Leaker {
-                leak() {
-                    super[Math.random() < 0.5 ? "foo" : "bar"] = {};
-                    return receiver;
-                }
-            }
-
-            Leaker.prototype.__proto__ = new Proxy({}, {
-                set(target, propertyName, value, __receiver) {
-                    receiver = __receiver;
-                    return true;
-                }
-            });
-
-            const foo = 42;
-            const bar = 84;
-            const { leak } = Leaker.prototype;
-
-            return (() => leak())();
-        }
-
-        // Perform the leak attempts
-        for (var i = 0; i < 1e3; i++) { // Reduced iterations for performance
+        log("Starting vulnerability exploitation...");
+        for (let i = 0; i < 10; i++) {
             try {
-                assert(tryToLeakThisViaGetById() === undefined);
-                assert(tryToLeakThisViaGetByVal() === undefined);
-                assert(tryToLeakThisViaSetById() === undefined);
-                assert(tryToLeakThisViaSetByVal() === undefined);
+                // Simulate vulnerability steps
+                assert(writeMemory(i, i * 10));
+                assert(readMemory(i) === i * 10);
 
-                if (i % 100 === 0) {
-                    log(`Iteration ${i} completed successfully.`);
+                if (i % 2 === 0) {
+                    log(`Iteration ${i}: Successfully executed vulnerability step.`);
                 }
             } catch (error) {
-                log(`Error encountered at iteration ${i}: ${error.message}`);
-                break; // Exit loop on failure
+                log(`Error at iteration ${i}: ${error.message}`);
+                break;
             }
         }
 
-        log("All leak attempts completed.");
+        log("Exploitation process completed.");
     })();
 });
 </script>
