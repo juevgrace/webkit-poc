@@ -2,14 +2,12 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width,
-initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebKit Vulnerability Exploit</title>
     <style>
 body {
 margin: 0;
-font-family: Arial,
-sans-serif;
+font-family: Arial, sans-serif;
 background-color: #000;
 color: #fff;
 }
@@ -23,10 +21,7 @@ height: 100%;
 overflow-y: auto;
 padding: 10px;
 box-sizing: border-box;
-background-color: rgba(0,
-0,
-0,
-0.8);
+background-color: rgba(0, 0, 0, 0.8);
 }
 
 #analysis {
@@ -35,32 +30,13 @@ padding: 20px;
 background-color: #333;
 color: #fff;
 border-radius: 5px;
-box-shadow: 0 0 10px rgba(0,
-0,
-0,
-0.5);
+box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
 }
 </style>
 </head>
 <body>
 
 <div id="log"></div>
-
-<div id="analysis">
-<h2>Analysis of WebKit Vulnerability Exploit</h2>
-<p>This script attempts to exploit vulnerabilities in WebKit by manipulating the 'this' keyword and using proxies to bypass certain checks.</p>
-<p>The script performs several steps:</p>
-<ul>
-<li>It waits for a payload to be received.</li>
-<li>It attempts privilege escalation.</li>
-<li>It injects malicious code into the page.</li>
-<li>It leaks sensitive data.</li>
-<li>It persists the exploit by storing data in localStorage.</li>
-<li>It delivers payload data to an attacker server.</li>
-</ul>
-<p>These actions are potentially dangerous and can compromise the security of the web application.</p>
-<p>It's important to note that this script is for educational purposes only and should not be used maliciously.</p>
-</div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function () {
