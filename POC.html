@@ -141,6 +141,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         for (var i = 0; i < 1e5; i++) {
             try {
+                log(`Iteration ${i}: Starting attempt`);
                 assert(tryToLeakThisViaGetById() === undefined);
                 assert(tryToLeakThisViaGetByVal() === undefined);
                 assert(tryToLeakThisViaSetById() === undefined);
