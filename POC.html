@@ -2,210 +2,67 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=scale">
     <title>WebKit Vulnerability Proof of Concept</title>
     <style>
-        :root {
-            --background-color: #222;
-            --text-color: #ddd;
-            --progress-bar-bg: #333;
-            --progress-bar-fill: #555;
-        }
-
         body {
-            background-color: var(--background-color);
-            color: var(--text-color);
             font-family: Arial, sans-serif;
+            background-color: #fafafa;
+            color: #aaa;
         }
 
-        #loading-dots {
-            display: none;
-            position: relative;
-            width: 100px;
-            height: 10px;
-            margin-left: 10px;
-        }
-
-        #loading-dots div {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            margin-right: 5px;
-            background-color: var(--progress-bar-fill);
-            border-radius: 50%;
-            animation: dot 1s infinite ease-in-out;
-        }
-        #loading-dots div:nth-child(1) { animation-delay: 0s; }
-        #loading-dots div:nth-child(2) { animation-delay: 0.2s; }
-        #loading-dots div:nth-child(3) { animation-delay: 0.4s; }
-
-        @keyframes dot {
-            0% { transform: translateY(0); }
-            50% { transform: translateY(-10px); }
-            100% { transform: translateY(0); }
-        }
-
-        #content {
-            display: block;
-        }
-
-        #progress-bar {
-            width: 100%;
-            background-color: var(--progress-bar-bg);
-            margin-top: 10px;
-        }
-
-        #progress {
-            width: 0;
-            height: 20px;
-            background-color: var(--progress-bar-fill);
-        }
-
-        #output {
-            white-space: pre-wrap; /* Keeps formatting for multiline logs */
-            margin-top: 10px;
-            font-family: monospace;
-            background-color: #f0f0f0;
-            padding: 10px;
-            border: 1px solid #ccc;
-            height: 200px;
-            overflow-y: auto; /* Make the log area scrollable */
-        }
-
-        .log-success {
-            color: green;
-        }
-
-        .log-warning {
-            color: orange;
-        }
-
-        .log-failure {
-            color: red;
-        }
-
-        button {
-            background-color: var(--progress-bar-fill);
-            color: var(--text-color);
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-
-        button:hover {
-            background-color: #444;
+        hroup {
+            margin-bottom: 1em; /* Use a valid unit like 1em */
         }
     </style>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; object-src 'none';">
 </head>
 <body>
-    <div id="loading-dots">
-        <div></div>
-        <div></div>
-        <div></div>
-    </div>
-    <div id="progress-bar">
-        <div id="progress"></div>
-    </div>
-    <div id="content">
-        <h1>WebKit Vulnerability Proof of Concept</h1>
-        <button onclick="startPoC()">Start PoC</button>
-        <button onclick="clearLog()">Clear Log</button>
-        <button onclick="exportLog()">Export Log</button>
-        <div id="output"></div>
-    </div>
 
-    <script>
-        function logStatus(message, level = 'INFO', data = {}) {
-            const output = document.getElementById("output");
-            const messageElement = document.createElement('p');
-            const timestamp = new Date().toLocaleTimeString();
-            const logEntry = {
-                timestamp,
-                level,
-                message,
-                data
-            };
-            messageElement.textContent = JSON.stringify(logEntry, null, 2);
-            messageElement.classList.add(level === 'ERROR' ? 'log-failure' : (level === 'WARNING' ? 'log-warning' : 'log-success'));
-            output.appendChild(messageElement);
-            output.scrollTop = output.scrollHeight;
-        }
+<hroup>Your Content Here</hroup>
 
-        async function startPoC() {
-            showLoadingDots();
-            hideContent();
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    console.log("WebKit Vulnerability PoC loaded.");
 
-            try {
-                logStatus("Starting PoC...", 'INFO');
+    // Step 1: Trigger the vulnerability
+    function triggerBug() {
+        // Your vulnerability-specific code here
+        console.log("Bug triggered.");
+    }
 
-                // Dynamically load the exploit script
-                const exploitScript = document.createElement('script');
-                exploitScript.setAttribute('src', `offsets/exploit.js`);
-                document.body.appendChild(exploitScript);
+    // Step 2: Leak addresses
+    function leakAddress() {
+        let buffer = new ArrayBuffer(8);
+        let view = new DataView(buffer);
+        // Use the vulnerability to leak memory here
+        // This is a mock example; replace with exploit logic
+        let leakedAddress = view.getUint32(0, true);
+        console.log("Address leaked:", leakedAddress);
+        return leakedAddress;
+    }
 
-                // Wait for the script to load and execute the exploit
-                await new Promise((resolve) => {
-                    exploitScript.onload = () => {
-                        console.log("Exploit script loaded successfully");
-                        resolve();
-                    };
-                });
+    // Step 3: Write to memory
+    function writeMemory(address, value) {
+        // Assuming we can write to the leaked address
+        let buffer = new ArrayBuffer(8);
+        let view = new DataView(buffer);
+        view.setUint32(0, value, true);
+        console.log("Memory written at address:", address, "with value:", value);
+    }
 
-                // Ensure the exploit script is running
-                await new Promise((resolve) => {
-                    const script = document.getElementById('exploit-script');
-                    if (script) {
-                        console.log("Exploit script is running");
-                        resolve();
-                    } else {
-                        console.log("Exploit script is not running");
-                        setTimeout(resolve, 1000);
-                    }
-                });
+    // Example exploit function
+    function exploitVulnerability() {
+        console.log("Exploit started...");
+        triggerBug();  // Step 1: Trigger the vulnerability
+        let leakedAddr = leakAddress();  // Step 2: Leak memory address
+        writeMemory(leakedAddr, 0x41414141);  // Step 3: Write to memory (example value)
+        console.log("Exploit complete.");
+    }
 
-                // Call the exploit function
-                await run_exploit();
-                logStatus("PoC Completed Successfully", 'INFO');
-            } catch (error) {
-                logStatus("PoC Failed: " + error.message, 'ERROR');
-            } finally {
-                hideLoadingDots();
-                showContent();
-            }
-        }
+    // Run the exploit
+    exploitVulnerability();
+});
+</script>
 
-        function showLoadingDots() {
-            document.getElementById("loading-dots").style.display = "inline-block";
-        }
-
-        function hideLoadingDots() {
-            document.getElementById("loading-dots").style.display = "none";
-        }
-
-        function hideContent() {
-            document.getElementById("content").style.display = "none";
-        }
-
-        function showContent() {
-            document.getElementById("content").style.display = "block";
-        }
-
-        function clearLog() {
-            document.getElementById("output").innerHTML = '';
-        }
-
-        function exportLog() {
-            const outputContent = document.getElementById("output").innerText;
-            const blob = new Blob([outputContent], { type: 'text/plain' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = 'log.txt';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-        }
-    </script>
 </body>
 </html>
