@@ -16,7 +16,7 @@
 <body>
     <script type="module">
         import { mem } from '/module/mem.mjs';
-import { debug_log } from '/module/utils.mjs';
+//import { debug_log } from '/module/utils.mjs';
 
 export function sleep(ms=0) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -85,6 +85,7 @@ void async function main() {
     }
 
     // import mem if you want to read the corrupted object
+    /*
     debug_log('normal Date:');
     const tmp_d = new Date();
     const date_p = mem.addrof(tmp_d);
