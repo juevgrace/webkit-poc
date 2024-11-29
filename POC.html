@@ -85,7 +85,6 @@ void async function main() {
     }
 
     // import mem if you want to read the corrupted object
-    /*
     debug_log('normal Date:');
     const tmp_d = new Date();
     const date_p = mem.addrof(tmp_d);
@@ -97,7 +96,6 @@ void async function main() {
     for (let i = 0; i < 8*8; i += 8) {
         debug_log(data_p.read64(i));
     }
-    */
 
     alert('try crash');
     debug_log(data2);
