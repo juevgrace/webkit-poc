@@ -1,1 +1,56 @@
+import asyncio
+import websockets
+import json
+import datetime
+
+# Configuration
+HOST = '0.0.0.0' # Listen on all interfaces
+PORT = 8765
+
+async def handler(websocket):
+    client_ip = websocket.remote_address[0]
+    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] New connection from {client_ip}")
+    
+    try:
+        async for message in websocket:
+            try:
+                # Try to parse as JSON for cleaner formatting, otherwise print raw
+                data = json.loads(message)
+                
+                # Check for specific log levels
+                prefix = ""
+                msg_content = data
+                
+                if isinstance(data, dict):
+                    if 'type' in data:
+                        if data['type'] == 'error':
+                            prefix = "\033[91m[ERROR]\033[0m " # Red
+                        elif data['type'] == 'info':
+                            prefix = "\033[94m[INFO]\033[0m "  # Blue
+                        elif data['type'] == 'success':
+                            prefix = "\033[92m[SUCCESS]\033[0m " # Green
+                        elif data['type'] == 'hex':
+                            prefix = "\033[93m[HEX]\033[0m " # Yellow
+                    
+                    if 'message' in data:
+                        msg_content = data['message']
+
+                print(f"{prefix}{msg_content}")
+                
+            except json.JSONDecodeError:
+                print(f"[RAW] {message}")
+                
+    except websockets.exceptions.ConnectionClosed:
+        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Connection closed: {client_ip}")
+
+async def main():
+    print(f"[*] PS4/PS5 WebKit Debugger listening on {HOST}:{PORT}")
+    async with websockets.serve(handler, HOST, PORT):
+        await asyncio.Future()  # run forever
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n[*] Server stopped.")
 
