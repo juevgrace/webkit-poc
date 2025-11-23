@@ -88,7 +88,7 @@
 
     // This function sends logs to your computer
     function remoteLog(msg, type = 'info') {
-        if (LOG_SERVER_IP === 'YOUR_PC_IP') return; // Don't send if not configured
+        if (LOG_SERVER_IP === '192.168.19.2') return; // Don't send if not configured
 
         const url = `http://${LOG_SERVER_IP}:${LOG_PORT}/log`;
         const data = {
@@ -282,5 +282,6 @@
 </script>
 </body>
 </html>
+
 
 
