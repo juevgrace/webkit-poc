@@ -1,56 +1,204 @@
-import asyncio
-import websockets
-import json
-import datetime
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PS5 12.50 Research Harness</title>
+    <style>
+        body { background-color: #1a1a1a; color: #00ff00; font-family: 'Courier New', monospace; padding: 20px; }
+        .log-entry { margin: 2px 0; border-bottom: 1px solid #333; }
+        .error { color: #ff5555; }
+        .success { color: #55ff55; }
+        .info { color: #55ffff; }
+        #status { border: 1px solid #555; padding: 10px; margin-bottom: 20px; font-weight: bold;}
+    </style>
+</head>
+<body>
+    <h1>WebKit Research Harness (FW 12.50)</h1>
+    <div id="status">Initializing...</div>
+    <div id="console-output"></div>
 
-# Configuration
-HOST = '0.0.0.0' # Listen on all interfaces
-PORT = 8765
+    <script>
+        // --- CONFIGURATION ---
+        const SERVER_IP = "192.168.1.53"; // CHANGE THIS to your PC IP
+        const SERVER_PORT = "8765";
 
-async def handler(websocket):
-    client_ip = websocket.remote_address[0]
-    print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] New connection from {client_ip}")
-    
-    try:
-        async for message in websocket:
-            try:
-                # Try to parse as JSON for cleaner formatting, otherwise print raw
-                data = json.loads(message)
-                
-                # Check for specific log levels
-                prefix = ""
-                msg_content = data
-                
-                if isinstance(data, dict):
-                    if 'type' in data:
-                        if data['type'] == 'error':
-                            prefix = "\033[91m[ERROR]\033[0m " # Red
-                        elif data['type'] == 'info':
-                            prefix = "\033[94m[INFO]\033[0m "  # Blue
-                        elif data['type'] == 'success':
-                            prefix = "\033[92m[SUCCESS]\033[0m " # Green
-                        elif data['type'] == 'hex':
-                            prefix = "\033[93m[HEX]\033[0m " # Yellow
+        // --- LOGGER (Handles Blind Debugging) ---
+        class Logger {
+            constructor() {
+                this.socket = new WebSocket(`ws://${SERVER_IP}:${SERVER_PORT}`);
+                this.queue = [];
+                this.connected = false;
+
+                this.socket.onopen = () => {
+                    this.connected = true;
+                    document.getElementById('status').innerText = "Debugger Connected";
+                    this.flush();
+                    this.log("Session started. UA: " + navigator.userAgent);
+                };
+
+                this.socket.onclose = () => {
+                    this.connected = false;
+                    document.getElementById('status').innerText = "Debugger Disconnected";
+                };
+
+                this.socket.onerror = (e) => {
+                    // Fallback to screen if socket fails
+                    this.screenLog("Socket Error. Is debug_server.py running?", "error");
+                };
+            }
+
+            _replacer(key, value) {
+                if (typeof value === 'bigint') return "0x" + value.toString(16) + "n";
+                if (value instanceof ArrayBuffer) return "[ArrayBuffer " + value.byteLength + "]";
+                return value;
+            }
+
+            send(type, msg) {
+                const payload = JSON.stringify({ type: type, message: msg }, this._replacer);
+                if (this.connected) {
+                    this.socket.send(payload);
+                } else {
+                    this.queue.push(payload);
+                }
+                this.screenLog(msg, type);
+            }
+
+            screenLog(msg, type) {
+                const div = document.createElement('div');
+                div.className = `log-entry ${type}`;
+                div.innerText = `[${type.toUpperCase()}] ${typeof msg === 'object' ? JSON.stringify(msg, this._replacer) : msg}`;
+                document.getElementById('console-output').prepend(div);
+            }
+
+            flush() {
+                while (this.queue.length > 0 && this.connected) this.socket.send(this.queue.shift());
+            }
+
+            log(msg) { this.send('info', msg); }
+            error(msg) { this.send('error', msg); }
+            success(msg) { this.send('success', msg); }
+        }
+
+        const logger = new Logger();
+
+        window.onerror = (msg, url, line, col, error) => {
+            logger.error(`Global Error: ${msg} @ ${line}:${col}`);
+            return true;
+        };
+
+        // --- PRIMITIVES (The Toolkit) ---
+        
+        const Primitives = {
+            // 64-bit helper
+            u64: (low, high) => BigInt(low) + (BigInt(high) << 32n),
+
+            // HEAVY Garbage Collection Trigger
+            // Critical for UAF: Forces the engine to sweep memory and merge free blocks.
+            forceGC: () => {
+                logger.log("Forcing Garbage Collection...");
+                try {
+                    const pressure = [];
+                    // Allocate huge buffers to push memory usage to the limit
+                    for (let i = 0; i < 64; i++) {
+                        pressure.push(new ArrayBuffer(1024 * 1024 * 16)); // 16MB chunks
+                    }
+                    // Drop references immediately
+                    while(pressure.length > 0) pressure.pop();
                     
-                    if 'message' in data:
-                        msg_content = data['message']
+                    // Trigger minor GC cycles
+                    for (let i = 0; i < 1000; i++) new ArrayBuffer(0x1000);
+                    
+                    logger.log("GC Pressure complete.");
+                } catch(e) {
+                    logger.error("GC Failed: " + e);
+                }
+            },
 
-                print(f"{prefix}{msg_content}")
+            // Heap Spray
+            // Fills memory with predictable values (0x4141...) to land fake objects.
+            spray: (sizeMB) => {
+                logger.log(`Spraying ${sizeMB}MB...`);
+                const chunkLen = 0x1000; // 4KB pages
+                const count = (sizeMB * 1024 * 1024) / chunkLen;
+                const sprayArr = new Array(count);
+                const buffer = new ArrayBuffer(chunkLen);
+                const view = new DataView(buffer);
                 
-            except json.JSONDecodeError:
-                print(f"[RAW] {message}")
+                // Fill with marker 0x41414141
+                for(let i=0; i < chunkLen; i+=4) view.setUint32(i, 0x41414141, true);
+
+                for (let i = 0; i < count; i++) {
+                    sprayArr[i] = buffer.slice(0);
+                }
+                window.sprayKeepAlive = sprayArr; // Prevent GC
+                logger.success("Spray complete.");
+            },
+
+            // JIT Check
+            // Returns TRUE if code execution speeds up (JIT active), FALSE if flat (JIT hardened/disabled).
+            checkJIT: () => {
+                logger.log("Checking JIT status...");
+                const benchmark = () => {
+                    let res = 0;
+                    const start = performance.now();
+                    for(let i=0; i < 5000000; i++) { res += i * 2; res ^= i; }
+                    const end = performance.now();
+                    return end - start;
+                };
+
+                const run1 = benchmark(); // Cold run (Interpreter)
+                const run2 = benchmark(); // Warm run (Should be JITted)
+
+                logger.log(`Run 1: ${run1.toFixed(2)}ms | Run 2: ${run2.toFixed(2)}ms`);
+
+                if (run2 < run1 * 0.5) {
+                    logger.success("JIT is ENABLED (Significant speedup detected)");
+                    return true;
+                } else {
+                    logger.error("JIT appears DISABLED or HARDENED (No significant speedup)");
+                    return false;
+                }
+            }
+        };
+
+        // --- VULNERABILITY SKELETON (Your 1-Day Work Area) ---
+        async function trigger_CVE_Skeleton() {
+            logger.log("[-] Starting CVE Test Logic...");
+            
+            // 1. Setup Phase: Create vulnerable objects
+            // Example: const ctx = new AudioContext();
+            
+            // 2. Trigger Phase: Cause the free
+            // Example: ctx.close(); 
+            // await new Promise(r => setTimeout(r, 100)); // Yield to event loop
+            
+            // 3. Reclaim Phase: Spray over the freed slot
+            Primitives.forceGC(); 
+            Primitives.spray(64); // Spray 64MB
+            
+            // 4. Check Phase: Did we crash or corrupt state?
+            logger.log("[-] Check complete. If you see this, we didn't crash.");
+        }
+
+        // --- MAIN ENTRY POINT ---
+        setTimeout(async () => {
+            try {
+                logger.log("Starting environment checks...");
                 
-    except websockets.exceptions.ConnectionClosed:
-        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] Connection closed: {client_ip}")
+                // Fingerprinting
+                logger.log(`Platform: ${navigator.platform}`);
+                logger.log(`Hardware Concurrency: ${navigator.hardwareConcurrency}`);
+                
+                // Security Checks
+                Primitives.checkJIT();
+                
+                // Run the exploit logic
+                await trigger_CVE_Skeleton();
 
-async def main():
-    print(f"[*] PS4/PS5 WebKit Debugger listening on {HOST}:{PORT}")
-    async with websockets.serve(handler, HOST, PORT):
-        await asyncio.Future()  # run forever
+            } catch (e) {
+                logger.error("Main Loop Crash: " + e.message);
+            }
+        }, 1500); // Delay to allow WebSocket to connect
 
-if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n[*] Server stopped.")
-
+    </script>
+</body>
+</html>
