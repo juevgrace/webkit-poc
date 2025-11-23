@@ -1,19 +1,1 @@
-function checkJIT() {
-    function target(x) {
-        return x + 1;
-    }
 
-    // Warm up the baseline JIT
-    for (let i = 0; i < 1000; i++) target(i);
-
-    // Warm up DFG (Data Flow Graph)
-    for (let i = 0; i < 100000; i++) target(i);
-
-    let start = performance.now();
-    for (let i = 0; i < 10000000; i++) target(i);
-    let end = performance.now();
-
-    // If 10 million ops take < 50ms, JIT is likely ON.
-    // If it takes > 500ms, you are in interpreter mode (JIT is dead).
-    log("Duration: " + (end - start));
-}
