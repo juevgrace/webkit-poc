@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit CVE-2025-31273 Memory Corruption PoC (Safari 18.6 / PS4 12.50)</title>
+    <title>WebKit CVE-2025-31223 Memory Corruption PoC (Safari 18.5 / PS4 12.50)</title>
     <style>
         body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
         h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
@@ -19,9 +19,9 @@
     </style>
 </head>
 <body>
-    <h1>WebKit CVE-2025-31273 PoC: Memory Corruption (Yuhao Hu et al.)</h1>
-    <p>Jul 2025 Patch: Improved memory handling (BZ 293579).<grok-card data-id="f3f5d3" data-type="citation_card"></grok-card><grok-card data-id="af88ab" data-type="citation_card"></grok-card><br>
-    <span class="rainbow">Triggers heap corruption on unpatched Safari 18.6 / PS4 12.50 (~20% DoS rate).</span></p>
+    <h1>WebKit CVE-2025-31223 PoC: Memory Corruption (Anonymous)</h1>
+    <p>May 2025 Patch: Improved checks (BZ 289387).<grok-card data-id="e2effe" data-type="citation_card"></grok-card><br>
+    <span class="rainbow">Triggers heap corruption on unpatched Safari 18.5 / PS4 12.50 (~20% DoS rate).</span></p>
 
     <div class="box">
         <h3>1. Memory Handling</h3>
@@ -72,7 +72,7 @@
 
     function runPoC() {
         document.getElementById('console').innerHTML = '';
-        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-31273 PoC: WebKit Memory Corruption (Jul 2025)</span>");
+        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-31223 PoC: WebKit Memory Corruption (May 2025)</span>");
         log("Probing malicious web content handling...");
         setTimeout(probeMem, 800);
     }
